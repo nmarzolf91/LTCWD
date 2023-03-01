@@ -37,3 +37,15 @@ vignettes/*.pdf
 
 # R Environment Variables
 .Renviron
+
+# Rproj
+LTCWD.Rproj
+
+# data
+Data/
+
+# Notes
+LTCWD_notes.docx
+
+# Manuscript
+Manuscript/
