@@ -36,8 +36,8 @@ unique(data$Stream) # should have 5 sites
 
 # put in order of increasing conductivity
 data$Stream <- fct_relevel(data$Stream,
-                           c('Taconazo 30', 'Piper', 'Saltito 60',
-                             'Sura 30', 'Arboleda 30'))
+                           c('Arboleda 30', 'Sura 30', 'Saltito 60',
+                             'Piper', 'Taconazo 30'))
 
 # 2) add full taxonomy to each bug ID ----
 tax_data <- list()
