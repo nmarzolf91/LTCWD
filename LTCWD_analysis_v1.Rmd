@@ -1,73 +1,107 @@
-## Header ----
-## Script name: 
-##
-## Purpose of script:
-##
-## Author: Nick Marzolf
-## Date Created: 2021-12-07
-## Date Modified: 
-## Email: nmarzol@ncsu.edu
-##
-## load packages:  
-{library(tidyverse)
-  library(readxl)
-  library(dplyr)
-  library(ggplot2)
-  library(readxl)
-  library(car)
-  library(drc)
-  library(nlme)
-  library(nlstools)
-  library(qpcR)
-  library(ggeffects)
-}
-##
-## clear the environment if needed
-rm(list = ls())
-##
-## set the ggplot theme
-source("C:/Users/Nick Marzolf/Desktop/Research/R code/theme_nick.R")
+---
+title: "Data for: "
+author: "Nicholas S. Marzolf"
+date: "Updated March 13, 2023"
+output: 
+  pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+RMarkdown file to accompany []. 
+
+To recreate this HTML, load the data files into a folder named 'Data' at the same path as the .rmd file, open the .rmd file, and click 'Knit'.
+
+
+# Load packages
+```{r load-packages, echo = TRUE, message=FALSE, warning = FALSE}
+# data manipulation
+library(tidyverse)
+library(readxl)
+library(dplyr)
+library(forcats)
+library(purrr)
+
+# plotting
+library(ggplot2)
+library(ggeffects)
+library(grid)
+library(ggpubr)
+library(ggrepel)
+library(lemon)
+source('C:/Users/Nick Marzolf/Desktop/Research/R code/theme_nick.R')
 theme_set(theme_nick())
 
-# stream chemistry ----
-# import
-chem <- read_excel('Data/LT_CWD_datasheet.xlsx',
-                   sheet = 'Chemistry') %>%
-  rename(site = 'Site',
-         srp = `SRP (ug/L)`,
-         no3_n = `NO3-N (ug/L)`,
-         nh4_n = `NH4-N (ug/L)`)
+# statistics
+library(car)
+library(drc)
+library(nlme)
+library(nlstools)
+library(qpcR)
 
-# mean of all measurmements
+# spatial
+library(sf)
+library(raster)
+library(spData)
+library(tmap)
+library(leaflet)
+library(spDataLarge)
+
+# community
+library(vegan)
+library(pander)
+
+```
+
+# Load data
+
+```{r load-data, warning=FALSE, echo=TRUE}
+chem <- readxl::read_excel('Data/LT_CWD_datasheet.xlsx',
+                           sheet = 'Chemistry') 
+
+cwd <- readxl::read_excel('Data/LT_CWD_datasheet.xlsx',
+                          sheet = 'Sheet1')
+```
+
+# Stream chemistry for 5 sites
+``` {r chemistry, warning=FALSE, echo=TRUE}
+chem <- chem %>% 
+  dplyr::rename(site = 'Site',
+                srp = `SRP (ug/L)`,
+                no3_n = `NO3-N (ug/L)`,
+                nh4_n = `NH4-N (ug/L)`)
+
+# calculate mean of all measurements
 chem_sum <- chem %>% 
-  group_by(site) %>%
-  summarise(across(.cols = 2:7,
-                   .fns = mean, na.rm = TRUE))
+  dplyr::group_by(site) %>%
+  dplyr::summarise(dplyr::across(.cols = 2:7,
+                                 .fns = mean, na.rm = TRUE))
 
 # calculate SD from stream chemistry data
 chem_sd <- chem %>% 
-  group_by(site) %>%
-  summarise(across(.cols = 2:7,
-                   .fns = sd, na.rm = TRUE))
+  dplyr::group_by(site) %>%
+  dplyr::summarise(dplyr::across(.cols = 2:7,
+                                 .fns = sd, na.rm = TRUE))
 
 # create object that sorts sites by decreasing mean conductivity
 sites <- chem_sum %>%
-  group_by(site) %>%
-  summarise(mean_cond = mean(Cond, na.rm = TRUE)) %>%
-  arrange(desc(mean_cond)) 
+  dplyr::group_by(site) %>%
+  dplyr::summarise(mean_cond = mean(Cond, na.rm = TRUE)) %>%
+  dplyr::arrange(desc(mean_cond)) 
 
+# create a characeter vector of sites in order
 sites <- as.character(sites$site)
 
+# create a vector for longer names used in plotting
 sites_long <- c(`Arb` = 'Arboleda 30',
                 `Sur30` = 'Sura 30',
                 `Tito60` = 'Saltito 60',
                 `Piper` = 'Piper',
                 `Tac` = 'Taconazo 30')
 
-
-chem_sd$site <- fct_relevel(chem_sd$site,
-                            sites)
-chem_sd <- arrange(chem_sd, desc(Cond))
 
 # fill in NA from Arb and Tac with long-term means
 # the monthly Arb and Tac data from those sites isn't available yet
@@ -85,18 +119,92 @@ chem_sum <- chem_sum %>%
          n_p = (din/14.0067)/(srp/30.973762))
 
 
-# relevel the site factor
-chem_sum$site <- fct_relevel(chem_sum$site,
-                             sites)
+# re-level the site factor
+chem_sum$site <- forcats::fct_relevel(chem_sum$site,
+                                      sites)
 
-chem_sum <- arrange(chem_sum, desc(Cond))
+table1 <- dplyr::arrange(chem_sum, desc(Cond))
+table1
+```
 
 
-# wood decomp rates ----
 
-# load data
-cwd <- read_excel('Data/LT_CWD_datasheet.xlsx',
-                  sheet = 'Sheet1') %>% 
+# Figure 1: Map
+```{r map, warning=FALSE, echo=TRUE}
+streams_gps <- readr::read_csv('C:/Users/Nick Marzolf/Desktop/NCSU/STREAMS/La Selva GIS data/LTREB Data/GPS sites.csv')
+
+
+cwd_coords <- streams_gps %>% 
+  dplyr::filter(Site %in% sites_long) %>% 
+  sf::st_as_sf(., 
+               coords = c('Long', 'Lat'),
+               crs = st_crs(4326))
+
+cwd_coords$Site <- forcats::fct_relevel(cwd_coords$Site,
+                                        c('Arboleda 30', 'Sura 30', 'Saltito 60',
+                                          'Piper', 'Taconazo 30'))
+
+# La Selva boundary
+lsbs <- sf::st_read(dsn = 'Data/Spatial/laselvaboundary.shp')
+
+# Streams at La Selva shapefile
+streams <- sf::st_read(dsn = 'Data/Spatial/streamsclip.shp')
+
+
+cr <- world %>%
+  dplyr::filter(name_long == 'Costa Rica')
+
+# make a basic map of Costa Rica
+cr_map <- tmap::tm_shape(cr)+   # create shape based on Costa Rica object
+  tmap::tm_polygons()+          # add cr as a polygon
+  tmap::tm_shape(lsbs)+         # create shape for the boundary of La Selva
+  tmap::tm_dots(size = 1)       # add lsbs as a dot
+cr_map
+
+
+# La Selva boundary and stream layer ----
+
+# Create a map of La Selva boundary and the stream network
+map_lsbs <- tmap::tm_shape(lsbs)+            # new shape: La Selva boundary
+  tmap::tm_borders()+                        # add as a border/line layer
+  tmap::tm_shape(streams)+                   # new shape: stream network
+  tmap::tm_lines(col = 'blue')+              # add as a line, colored blue
+  tmap::tm_scale_bar(breaks = c(0, 1, 2),    # add a scale bar, with demarkations for 0, 1, and 2 km
+                     text.size = 0.75,       # change text size
+                     position = c('left',    # put the scale bar in the bottom left
+                                  'bottom'))
+map_lsbs
+
+
+fig1 <- tmap::tm_shape(lsbs)+                   # create La Selva boundary layer
+  tmap::tm_borders(col = 'black')+
+  tmap::tm_shape(streams)+                              # create stream network layer
+  tmap::tm_lines(col = 'blue')+
+  tmap::tm_shape(cwd_coords)+                             # map the locations of pH sites
+  tmap::tm_symbols(size = 1,                            # change the size
+                   col = 'Site',                        # colored by site name
+                   border.col = 'black',                # with black boundary color
+                   palette = "viridis", n = 5)+         # change the color palette
+  tmap::tm_scale_bar(breaks = c(0, 1, 2),               # add scale bar
+                     text.size = 0.75,
+                     position = c('left', 'bottom'))+
+  tmap::tm_layout(inner.margins = c(.15,.01, .01, .4),  # change the margins to fit the legend and inset map
+                  legend.position = c('right', 'top'),
+                  legend.frame = TRUE)+
+  tmap::tm_compass(position = c('left', 'top'))+        # add compass north star
+  tmap::tm_grid(projection = 4326,
+                labels.inside.frame = FALSE,
+                lines = FALSE)
+fig1
+
+```
+
+
+
+# Calculate wood decomposition rates
+```{r kCWD, warning=FALSE, echo=TRUE}
+# begin cleaning data
+cwd <- cwd %>% 
   filter(Flag == 0) %>%
   dplyr::select(site = Site, 
                 month = `Collection Month`,
@@ -105,106 +213,49 @@ cwd <- read_excel('Data/LT_CWD_datasheet.xlsx',
                 dry_mass = `CWD Pack Dry Mass (g)`,
                 init_den = `init wood density (g/cm3)`,
                 fin_den = `final wood density (g/cm3)`) %>%
-  filter(month < 24)
+  dplyr::filter(month < 24)
 
-cwd$site <- forcats::fct_relevel(cwd$site, sites)
+# re-level site factor based on conductivity
+cwd$site <- forcats::fct_relevel(cwd$site, 
+                                 sites)
 
-
+# calculate % dry mass remaining
 cwd_calc <- cwd %>%
   dplyr::filter(site != 'Sac') %>%
-  dplyr::mutate(percent_mass = (dry_mass/init_mass)*100) # same as for density
+  dplyr::mutate(percent_mass = (dry_mass/init_mass)*100)
 
-# final dry mass to export for bug analysis
+# dry mass of each pack to be used in the bug analysis
 final_dry_mass <- cwd_calc %>% 
   dplyr::select(site, month, rep, dry_mass) %>% 
   dplyr::filter(month != 0)
 
-readr::write_csv(final_dry_mass,
-                 'data/final_dry_mass.csv')
-
-ggplot(cwd_calc, 
-       aes(x = month, y = percent_mass,
-           color = rep))+
-  geom_point()+
-  geom_smooth(method = 'lm')+
-  facet_wrap(site ~ ., ncol = 5)
-
-# # summarise by site and date
-# cwd_sum <- cwd_calc %>%
-#   group_by(site, month) %>%
-#   summarise(mean_mass = mean(dry_mass, na.rm = TRUE),
-#             sd_mass = sd(dry_mass, na.rm = TRUE),
-#             mean_per_mass = mean(percent_mass, na.rm = TRUE),
-#             sd_per_mass = sd(percent_mass, na.rm = TRUE),
-#             mean_den = mean(fin_den, na.rm = TRUE),
-#             sd_den = sd(fin_den, na.rm = TRUE)) 
-# 
-# # plot- percent change in mass (same as density)
-# # yes, the Piper increases but it's better than the other options!
-# ggplot(cwd_sum,
-#        aes(x = month, 
-#            y = mean_per_mass,
-#            color = site))+
-#   geom_point(size = 5)+
-#   geom_smooth(method = 'lm',
-#               alpha = 0.3)+
-#   geom_errorbar(aes(ymin = mean_per_mass - sd_per_mass,
-#                     ymax = mean_per_mass + sd_per_mass))+
-#   facet_grid(. ~ site, 
-#              #ncol = 5,
-#              labeller = as_labeller(sites_long))+
-#   scale_y_log10()+
-#   labs(x = 'Months in Stream',
-#        y = '% Dry Mass Remaining')+
-#   scale_color_viridis_d()+
-#   theme(legend.position = 'none')
-# 
-# 
-# ancova <- aov(data = cwd_sum, 
-#               mean_per_mass ~ month + site)
-# summary(ancova)
-# Anova(ancova, type = 'III')
-# 
-# tukey <- HSD.test(ancova, 'site')
-# tukey
-
-
-# calculate decay rates
-
-k_cwd_add <- lm(data = cwd_calc,
-                log(percent_mass) ~ month + site)
+# calculate decay rates using ANCOVA
 k_cwd_int <- lm(data = cwd_calc,
                 log(percent_mass) ~ month * site)
 
-anova(k_cwd_add,
-      k_cwd_int) # use the interaction model (p = 0.02)
-
 summary(k_cwd_int)
 anova(k_cwd_int)
-Anova(k_cwd_int, type = 'III')
+car::Anova(k_cwd_int, type = 'III')
 
-# Because there is a significant interaction term, we can run a lm for each site
-# to extract the slope and intercept
-decay_rates <- cwd_calc %>%
-  filter(site != 'Sac') %>%
-  group_by(site) %>%
-  summarise(
+table2 <- cwd_calc %>%
+  dplyr::filter(site != 'Sac') %>%
+  dplyr::group_by(site) %>%
+  dplyr::summarise(
     int = round((coef(lm(log(percent_mass) ~ month))[1]), 3),
     k_yr = (round((coef(lm(log(percent_mass) ~ month))[2])*12, 3))*-1,
     error = summary(lm(log(percent_mass) ~ month))$coefficient[3],
     #df = summary(lm(log(percent_mass) ~ month))$fstatistic,
     r2 = summary(lm(log(percent_mass) ~ month))$r.squared,
-    p = anova(lm(log(percent_mass) ~ month))$'Pr(>F'[1]
-  )
-decay_rates
+    p = anova(lm(log(percent_mass) ~ month))$'Pr(>F'[1])
+table2
 
-ggplot(data = cwd_calc,
-       aes(y = log(percent_mass),
-           x = month))+
+fig2 <- ggplot(data = cwd_calc,
+               aes(y = log(percent_mass),
+                   x = month))+
   geom_point(aes(color = site))+
   geom_smooth(aes(color = site),
               method = 'lm',se = FALSE)+
-  geom_label(data = decay_rates %>% 
+  geom_label(data = table2 %>% 
                dplyr::select(site, k_yr),
              aes(x = 2.5, y = 3.6,
                  label = paste0('k = ',k_yr)))+
@@ -215,15 +266,18 @@ ggplot(data = cwd_calc,
   scale_color_viridis_d()+
   scale_x_continuous(breaks = c(0, 1, 3, 6, 12))+
   theme(legend.position = 'none')
+fig2
+```
 
-# merge chemistry with decay rates ----
 
-# extract k from decay_rates
-merged <- decay_rates %>%
+
+# Merge chemistry with decay rates
+```{r decay-chemistry, warning=FALSE, echo=TRUE}
+merged <- table2 %>%
   dplyr::select(site, k_yr, error) %>% 
-  right_join(chem_sum, 'site') %>%
+  dplyr::right_join(chem_sum, 'site') %>%
   dplyr::select(-Temp) %>%
-  pivot_longer(srp:n_p)
+  tidyr::pivot_longer(srp:n_p)
 
 names_long <- c(`Cond` = 'Conductivity (µS/cm)',
                 `din` = 'DIN (µg/L)',
@@ -232,13 +286,15 @@ names_long <- c(`Cond` = 'Conductivity (µS/cm)',
                 `no3_n` = 'NO3-N (µg/L)',
                 `pH` = 'pH',
                 `srp` = 'SRP (µg/L)')
+```
 
-
-# decay rates as a function of stream chemistry ----
-
+## Run linear and non-linear models of kCWD ~ chemistry
+```{r linear-mods, warning=FALSE, echo=TRUE}
 vars <- unique(merged$name)
 
 # linear: Y ~ a + bX
+
+# create empty dataframe to populate in the for loop
 linear <- data.frame(mod = character(),
                      var = character(),
                      a = numeric(),
@@ -250,41 +306,40 @@ linear <- data.frame(mod = character(),
                      AIC = numeric(),
                      p = numeric(),
                      rse = numeric(),
-                     df = numeric()
-)
+                     df = numeric())
 
+
+# for loop across each parameter
 for(i in 1:length(vars)){
+  # which var is being predicted
   var <- vars[i]
+  
+  # run the lm of k ~ chemistry
   lm <- lm(data = merged %>%
              filter(name == var),
            k_yr ~ value)
   
-  print(plot(ggpredict(lm)))
-  
+  # populate the empty data frame
   linear <- linear %>% 
     add_row(
-      mod = 'Linear',
-      var = var,
-      a = coef(lm)[1],
-      a_2.5 = confint(lm)[1,1],
-      a_97.5 = confint(lm)[1,2],
-      b = coef(lm)[2],
-      b_2.5 = confint(lm)[2,1],
-      b_97.5 = confint(lm)[2,2],
-      AIC = AIC(lm),
-      p = summary(lm)$coefficients[2,4],
-      rse = summary(lm)$sigma,
-      df = summary(lm)$df[2]
+      mod = 'Linear',                    # what kind of model
+      var = var,                         # for which variable
+      a = coef(lm)[1],                   # intercept
+      a_2.5 = confint(lm)[1,1],          # intercept low CI
+      a_97.5 = confint(lm)[1,2],         # intercept high CI
+      b = coef(lm)[2],                   # slope
+      b_2.5 = confint(lm)[2,1],          # slope low CI
+      b_97.5 = confint(lm)[2,2],         # slope high CI
+      AIC = AIC(lm),                     # model AIC
+      p = summary(lm)$coefficients[2,4], # p value
+      rse = summary(lm)$sigma,           # RSE
+      df = summary(lm)$df[2]             # df
     )
 }
+```
 
-linear %>% 
-  filter(p < 0.05)
-
-
-
-# non-linear
-## Michaelis-Menten: Y ~ aX/b+X
+```{r Mic-Men-mods, warning=FALSE, echo=TRUE}
+# empty data frame
 micmen <- data.frame(mod = character(),
                      fit = character(),
                      var = character(),
@@ -295,9 +350,9 @@ micmen <- data.frame(mod = character(),
                      b_2.5 = numeric(),
                      b_97.5 = numeric(),
                      AIC = numeric(),
-                     p = numeric()
-)
+                     p = numeric())
 
+# for loop for each variable
 for(i in 1:length(vars)) {
   var <- vars[i]
   mm_mod <- try(nls(data = merged %>% 
@@ -305,6 +360,7 @@ for(i in 1:length(vars)) {
                     k_yr ~ SSmicmen(value, a, b))
   )
   
+  # fault tolerance, won't work for every parameter
   if(inherits(mm_mod, 'try-error')){
     micmen <- micmen %>% 
       add_row(fit = 'error',
@@ -313,6 +369,7 @@ for(i in 1:length(vars)) {
     next
   }
   
+  # populate the data frame
   micmen <- micmen %>% 
     add_row(
       mod = 'Michaelis-Menten',
@@ -328,10 +385,9 @@ for(i in 1:length(vars)) {
       p = summary(mm_mod)$coefficients[8]
     )
 }
+```
 
-micmen %>% 
-  filter(p < 0.05)
-
+```{r logarithmic, warning=FALSE, echo=TRUE}
 ## Logarithmic: Y ~ a + b*log(X)
 logarithmic <- data.frame(mod = character(),
                           var = character(),
@@ -372,11 +428,9 @@ for(i in 1:length(vars)) {
       df = summary(loga)$df[2]
     )
 }
+```
 
-logarithmic %>% 
-  filter(p < 0.05)
-
-
+```{r logistic, warning=FALSE, echo=TRUE}
 ## Logistic: Y ~ 1/1+exp(X)
 logistic <- data.frame(mod = character(),
                        var = character(),
@@ -419,7 +473,10 @@ for(i in 1:length(vars)){
       df = summary(logi)$rseMat[2])
 }
 
+```
 
+## Combine and evaluate model fits
+```{r model-comps, warning=FALSE, echo=TRUE}
 # combine model outputs
 
 aic_all <- rbind(logistic %>% 
@@ -453,13 +510,17 @@ for(i in 1:length(vars)) {
 }
 
 
-aic_wts %>% 
+table3 <- aic_wts %>% 
   dplyr::select(var, mod, weights) %>% 
   pivot_wider(names_from = var, 
               values_from = weights) %>% 
   knitr::kable(format = 'rst')
+table3
+
+```
 
 
+```{r pred-k, warning=FALSE, echo=TRUE}
 # plot decay rates as a function of chemistry
 # add lines for SRP (linear), NH4 (M-M), N:P(M-M), and cond (linear)
 
@@ -572,6 +633,7 @@ fig3 <- ggplot(merged_preds)+
   theme(axis.title.x = element_blank(),
         legend.background = element_blank(),
         legend.box.background = element_rect(colour = "black"))
+fig3
 
 shift_legend2 <- function(p) {
   # ...
@@ -580,52 +642,155 @@ shift_legend2 <- function(p) {
   facet.panels <- grep("^panel", gp[["layout"]][["name"]])
   empty.facet.panels <- sapply(facet.panels, function(i) "zeroGrob" %in% class(gp[["grobs"]][[i]]))
   empty.facet.panels <- facet.panels[empty.facet.panels]
-  
+
   # establish name of empty panels
   empty.facet.panels <- gp[["layout"]][empty.facet.panels, ]
   names <- empty.facet.panels$name
   # example of names:
   #[1] "panel-3-2" "panel-3-3"
-  
-  # now we just need a simple call to reposition the legend
-  reposition_legend(p, 'center', panel=names)
+
+# now we just need a simple call to reposition the legend
+  lemon::reposition_legend(p, 'center', panel=names)
 }
 
+
 shift_legend2(fig3)
+```
 
 
-# old plots ----
-# plot- raw change in density (VALUES INCREASE, DON'T USE)
-ggplot(cwd_sum,
-       aes(x = month, 
+# Macroinvertebrate analysis
+
+```{r load-bug-data, warning=FALSE, echo=TRUE}
+data <- readxl::read_excel('Data/Samples_Nick.xlsx')
+taxonomy <- readxl::read_excel('Data/Samples_Nick.xlsx',
+                               sheet = 'taxonomy')
+
+data$Stream <- forcats::fct_relevel(data$Stream,
+                           c('Arboleda 30', 'Sura 30', 'Saltito 60',
+                             'Piper', 'Taconazo 30'))
+
+# build taxonomy for each ID
+tax_data <- list()
+for(i in 1:length(unique(data$Taxa))){
+  rank <- unique(data$Taxa)[i]
+  
+  tax_info <- taxonomy %>% 
+    dplyr::filter(Taxa %in% rank)
+  
+  tax_data[[i]] <- data %>% 
+    data.frame() %>% 
+    dplyr::filter(Taxa == rank) %>% 
+    dplyr::mutate(rank = tax_info$Rank,
+           family = tax_info$Family,
+           order = tax_info$Order,
+           class = tax_info$Class,
+           phylum = tax_info$Phylum,
+           month = as.numeric(gsub(".*?([0-9]+).*", "\\1", Sample)),
+           rep = gsub("\\d+", "", Sample))
+}
+
+# create df
+tax_data <- purrr::reduce(tax_data, rbind)
+
+# clean the data
+tax_data_clean <- tax_data %>% 
+  dplyr::filter(QAQC == 0,
+         month != 24) 
+```
+
+```{r bug-stats, warning=FALSE, echo=TRUE}
+
+final_dry_mass <- readr::read_csv('Data/final_dry_mass.csv')
+
+final_dry_mass$site <- recode_factor(final_dry_mass$site,
+                                     Arb = 'Arboleda 30',
+                                     Sur30 = 'Sura 30',
+                                     Tito60 = 'Saltito 60',
+                                     Piper = 'Piper',
+                                     Tac = 'Taconazo 30')
+
+
+macro_density <- tax_data_clean %>% 
+  dplyr::filter(!is.na(order)) %>%                               # remove NAs from Order
+  dplyr::select(site = Stream, order, month, rep, Total) %>%     # get the necessary columns
+  dplyr::group_by(site, month, rep) %>%                          # and do the grouping
+  dplyr::summarise(total_order = sum(Total)) %>% 
+  dplyr::left_join(final_dry_mass,
+            by = c('site', 'month', 'rep')) %>% 
+  dplyr::mutate(abund_per_dm = total_order/dry_mass)
+
+macro_density_sum <- macro_density %>% 
+  group_by(site, month) %>% 
+  summarise(mean_den = mean(abund_per_dm, na.rm = TRUE),
+            se_den = sd(abund_per_dm, na.rm = TRUE)/length(mean_den))
+
+figure4 <- ggplot(macro_density_sum,
+       aes(x = month,
            y = mean_den,
-           color = site))+
-  geom_point(size = 5)+
-  geom_smooth(method = 'lm',
-              alpha = 0.3)+
-  geom_errorbar(aes(ymin = mean_den - sd_den,
-                    ymax = mean_den + sd_den))+
-  facet_wrap(site ~ ., 
-             ncol = 5,
-             labeller = as_labeller(sites_long))+
-  labs(x = 'Months in Stream')+
-  scale_color_viridis_d()+
-  theme(legend.position = 'none')
+           color = site,
+           group = site))+
+  geom_point()+
+  geom_line()+
+  geom_errorbar(aes(ymin = mean_den - se_den,
+                    ymax = mean_den + se_den),
+                width = 0)+
+  scale_x_continuous(breaks = c(0, 1, 3, 6, 12))+
+  labs(y = expression(paste('Mean macroinvertebrate density (# g   ',DM^-1,')')),
+       x = 'Month')+
+  scale_color_viridis_d(name = 'Site')+
+  theme(axis.title = element_text(size = 12))
+figure4
 
 
-# plot- raw dry mass (VALUES INCREASE, DON'T USE)
-ggplot(cwd_sum,
-       aes(x = month, 
-           y = mean_mass,
-           color = site))+
-  geom_point(size = 5)+
-  geom_smooth(method = 'lm',
-              alpha = 0.3)+
-  geom_errorbar(aes(ymin = mean_mass - sd_mass,
-                    ymax = mean_mass + sd_mass))+
-  facet_wrap(site ~ ., 
-             ncol = 5,
-             labeller = as_labeller(sites_long))+
-  labs(x = 'Months in Stream')+
-  scale_color_viridis_d()+
-  theme(legend.position = 'none')
+macro_lm <- lm(data = macro_density,
+               log10(abund_per_dm) ~ factor(month) * site)
+
+summary(macro_lm)
+anova(macro_lm)
+hist(macro_lm$residuals)
+(agricolae::HSD.test(macro_lm, 'site'))
+
+```
+
+```{r NMDS, warning=FALSE, echo=TRUE}
+
+```
+
+
+
+# Session Info
+```{r session-info}
+pander(sessionInfo())
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
