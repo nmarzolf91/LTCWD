@@ -37,6 +37,10 @@ cwd_coords <- streams_gps %>%
   filter(Site %in% cwd_sites) %>% 
   st_as_sf(., coords = c('Long', 'Lat'))
 
+cwd_coords$Site <- fct_relevel(cwd_coords$Site,
+                               c('Arboleda 30', 'Sura 30', 'Saltito 60',
+                                 'Piper', 'Taconazo 30'))
+
 # La Selva boundary
 lsbs <- st_read(dsn = 'Data/Spatial/laselvaboundary.shp')
 
@@ -82,13 +86,17 @@ map_cwd_sites <- tm_shape(lsbs)+                   # create La Selva boundary la
                text.size = 0.75,
                position = c('left', 'bottom'))+
   tm_layout(inner.margins = c(.15,.01, .01, .4),  # change the margins to fit the legend and inset map
-            legend.position = c('right', 'top'))+
-  tm_compass(position = c('left', 'top'))         # add compass north star
+            legend.position = c('right', 'top'),
+            legend.frame = TRUE)+
+  tm_compass(position = c('left', 'top'))+        # add compass north star
+  tm_grid(projection = 4326,
+          labels.inside.frame = FALSE,
+          lines = FALSE)
 map_cwd_sites
 
 # add the inset of Costa Rica into the map
 map_cwd_sites                                       # add the map with: La Selva boundary, stream layer, and points to the plot window
 map_cwd_inset <- print(cr_map,                      # add the inset
-                      vp = viewport(0.73, 0.205,   # change the values here to move the inset location
+                      vp = viewport(0.73, 0.25,   # change the values here to move the inset location
                                     width = 0.35,  # change the values here to change the size of the inset image
                                     height = 0.35))

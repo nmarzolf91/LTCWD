@@ -53,6 +53,8 @@ library(spDataLarge)
 # community
 library(vegan)
 library(pander)
+library(lattice)
+library(permute)
 
 ```
 
@@ -205,7 +207,7 @@ fig1
 ```{r kCWD, warning=FALSE, echo=TRUE}
 # begin cleaning data
 cwd <- cwd %>% 
-  filter(Flag == 0) %>%
+  dplyr::filter(Flag == 0) %>%
   dplyr::select(site = Site, 
                 month = `Collection Month`,
                 rep = Rep,
@@ -513,8 +515,7 @@ for(i in 1:length(vars)) {
 table3 <- aic_wts %>% 
   dplyr::select(var, mod, weights) %>% 
   pivot_wider(names_from = var, 
-              values_from = weights) %>% 
-  knitr::kable(format = 'rst')
+              values_from = weights)
 table3
 
 ```
@@ -523,22 +524,6 @@ table3
 ```{r pred-k, warning=FALSE, echo=TRUE}
 # plot decay rates as a function of chemistry
 # add lines for SRP (linear), NH4 (M-M), N:P(M-M), and cond (linear)
-
-merged_preds <- rbind(merged %>% 
-                        filter(name == 'srp') %>% 
-                        mutate(pred_k = -0.12456 + (-0.002889*value)),
-                      merged %>% 
-                        filter(name == 'Cond') %>% 
-                        mutate(pred_k = -0.075 + (-0.0022*value)) ,
-                      merged %>% 
-                        filter(name == 'nh4_n') %>% 
-                        mutate(pred_k = (-0.0768*value)/(-28.13+value)) ,
-                      merged %>% 
-                        filter(name == 'n_p') %>% 
-                        mutate(pred_k = (-0.179*value)/(-1.944+value)),
-                      merged %>% 
-                        filter(name %in% c('no3_n', 'din', 'pH')) %>% 
-                        mutate(pred_k = NA))
 
 merged_preds <- data.frame()
 for(i in 1:length(best_fits$var)) {
@@ -633,8 +618,6 @@ fig3 <- ggplot(merged_preds)+
   theme(axis.title.x = element_blank(),
         legend.background = element_blank(),
         legend.box.background = element_rect(colour = "black"))
-fig3
-
 shift_legend2 <- function(p) {
   # ...
   # to grob
@@ -652,7 +635,6 @@ shift_legend2 <- function(p) {
 # now we just need a simple call to reposition the legend
   lemon::reposition_legend(p, 'center', panel=names)
 }
-
 
 shift_legend2(fig3)
 ```
@@ -753,9 +735,162 @@ hist(macro_lm$residuals)
 ```
 
 ```{r NMDS, warning=FALSE, echo=TRUE}
+tax_data_clean_family_log <- tax_data_clean %>% 
+  dplyr::filter(!is.na(family)) %>%                               # remove NAs from Order
+  dplyr::select(Stream, family, month, rep, Total) %>%    # get the necessary columns
+  dplyr::group_by(Stream, month, family) %>%         # and do the grouping
+  dplyr::summarise(mean_family = mean(Total, na.rm = TRUE)) %>%   # sum by order in each possible grouping 
+  dplyr::mutate(log_total = log10(1 + mean_family)) %>%          # log10 + 1 transform data
+  dplyr::select(-mean_family) %>% 
+  pivot_wider(names_from = family,                         # pivot data
+              values_from = log_total,
+              values_fill = 0)
 
+tax_data_log_matrix_fam <- tax_data_clean_family_log[,-c(1:2)]
+tax_data_log_meta_fam <- tax_data_clean_family_log[,c(1:2)]
+
+nmds_family_log_2d <- vegan::metaMDS(tax_data_log_matrix_fam,
+                                     distance = 'bray',
+                                     k = 2,
+                                     autotransform = FALSE)
+
+stress_fam_log_2d <- round(nmds_family_log_2d$stress, 3)
+
+# pick the log transformed 2d NMDS (14.4% stress)
+
+nmds_family_out <- data.frame(x = nmds_family_log_2d$points[,1],
+                              y = nmds_family_log_2d$points[,2])
+
+nmds_family_out <- cbind(tax_data_log_meta_fam,
+                         nmds_family_out)
+
+fit_fam <- (vegan::envfit(nmds_family_log_2d,
+                          tax_data_log_matrix_fam,
+                          perm = 9999))
+
+scrs_fam <- data.frame(vegan::scores(fit_fam, 'vectors'))
+
+scrs_fam$pvals <- fit_fam$vectors$pvals
+
+scrs_fam_sig <- subset(scrs_fam, pvals <= 0.05)
+
+scrs_fam_sig$env.variables <- row.names(scrs_fam_sig)
+
+
+plot_nmds_family_scrs <- ggplot(nmds_family_out,
+                                aes(x = x, y = y))+
+  geom_point(size = 2)+
+  geom_segment(data = scrs_fam_sig,
+               aes(x = 0, xend = NMDS1,
+                   y = 0, yend = NMDS2),
+               arrow = arrow(length = unit(0.25, 'cm')),
+               color = 'black')+
+  ggrepel::geom_label_repel(data = scrs_fam_sig,
+                            aes(NMDS1, NMDS2,
+                                label = env.variables),
+                            size = 3)+
+  labs(x = 'NMDS 1',
+       y = 'NMDS 2')+
+  # lims(x = c(-1,1),
+  #      y = c(-0.75, 0.75))+
+  geom_label(label = paste('2D Stress = ', stress_fam_log_2d),
+             x = -0.65,
+             y = -0.75)
+plot_nmds_family_scrs
+
+
+source('Code/veganCovEllipse.R')
+streams <- data.frame()
+for(i in unique(nmds_family_out$Stream)){
+  streams <- rbind(streams,
+                   cbind(
+                     as.data.frame(
+                       with(nmds_family_out[nmds_family_out$Stream == i,],
+                            veganCovEllipse(cov.wt(cbind(x, y),
+                                                   wt = rep(1/length(x),
+                                                            length(x)))$cov,
+                                            center = c(mean(x),
+                                                       mean(y)
+                                            )
+                            )
+                       )
+                     ), 
+                     Stream = i)
+  )
+} # end for loop
+
+plot_nmds_streams <- ggplot(data = nmds_family_out,
+                            aes(x = x, y = y))+
+  geom_point(aes(color = Stream),
+             size = 2)+
+  geom_path(data = streams,
+            linewidth = 1,
+            aes(x = x, y = y, color = Stream))+
+  labs(x = "NMDS 1", 
+       y = "NMDS 2")+
+  lims(x = c(-1,1),
+       y = c(-0.75,0.75))+
+  theme(legend.background = element_blank())+
+  scale_color_viridis_d(name = element_blank())
+plot_nmds_streams
+
+fig5 <- ggpubr::ggarrange(plot_nmds_family_scrs,
+                  plot_nmds_streams,
+                  align = 'h', 
+                  widths = c(1,1.4),
+                  labels = 'auto',
+                  label.x = c(0.18,0.13))
+fig5
+
+
+# Permanova
+# The goal of this test is to tell you if there are significant differences in your response variables among your groupings
+permanova <- vegan::adonis2(tax_data_log_matrix_fam ~ Stream * month, 
+                            data = tax_data_log_meta_fam, 
+                            permutations = 9999, 
+                            method = 'bray', 
+                            by = 'terms')
+permanova
+summary(permanova)
+
+# SIMPER
+sim <- with(tax_data_log_meta_fam, 
+            simper(tax_data_log_matrix_fam, Stream))
+
+summary(sim)
+
+simper_use <- do.call(rbind, summary(sim)) %>% 
+  tibble::rownames_to_column() %>% 
+  dplyr::rowwise() %>% 
+  dplyr::mutate(comparison = strsplit(rowname, "[.]")[[1]][1],
+                family = strsplit(rowname, "[.]")[[1]][2]) %>% 
+  dplyr::select(-rowname)
+
+simper_sig <- simper_use %>% 
+  dplyr::filter(p <= 0.05) %>% 
+  dplyr::group_by(comparison, family) %>% 
+  dplyr::summarise(n_sig = length(p),
+                   mean_avg = mean(average, na.rm = TRUE)) 
+
+
+table_s1 <- simper_use %>% 
+  dplyr::filter(p <= 0.05) %>% 
+  dplyr::group_by(comparison, family)
+
+table_s1[,-c(8:9)] <- round(table_s1[,-c(8:9)],
+                       digits = 2)
+
+
+
+# ANOSIM
+anosim <- anosim(tax_data_log_matrix_fam,
+                 grouping = tax_data_log_meta_fam$Stream,
+                 distance = 'bray',
+                 permutations = 9999)
+summary(anosim)
+anosim_r <- anosim$statistic
+anosim_p <- anosim$signif
 ```
-
 
 
 # Session Info
