@@ -199,6 +199,10 @@ fig1 <- tmap::tm_shape(lsbs)+                   # create La Selva boundary layer
                 lines = FALSE)
 fig1
 
+tmap_save(tm = fig1,
+          filename = 'Figures/fig1.png', 
+          dpi = 600, 
+          width = 4, height = 4)
 ```
 
 
@@ -269,6 +273,11 @@ fig2 <- ggplot(data = cwd_calc,
   scale_x_continuous(breaks = c(0, 1, 3, 6, 12))+
   theme(legend.position = 'none')
 fig2
+
+ggsave(plot = fig2, 
+       'Figures/fig2.png',
+       dpi = 600, 
+       width = 10,height = 3)
 ```
 
 
@@ -540,7 +549,7 @@ for(i in 1:length(best_fits$var)) {
       filter(name == var) %>% 
       mutate(pred_k = logis$d/(1+exp(logis$b*(value - logis$e))),
              best_fit = type)
-  
+    
   } # end logistic if statement
   
   if(type == 'Linear') {
@@ -548,10 +557,10 @@ for(i in 1:length(best_fits$var)) {
       filter(var == !!var)
     
     if(line$p <= 0.05){
-    df <- merged %>% 
-      filter(name == var) %>% 
-      mutate(pred_k = line$a + (value*line$b),
-             best_fit = type)
+      df <- merged %>% 
+        filter(name == var) %>% 
+        mutate(pred_k = line$a + (value*line$b),
+               best_fit = type)
     } else {
       df <- merged %>% 
         filter(name == var) %>% 
@@ -565,10 +574,10 @@ for(i in 1:length(best_fits$var)) {
       filter(var == !!var)
     
     if(mm$p <= 0.05){
-    df <- merged %>% 
-      filter(name == var) %>% 
-      mutate(pred_k = (mm$a*value)/(value + mm$b),
-             best_fit = type)
+      df <- merged %>% 
+        filter(name == var) %>% 
+        mutate(pred_k = (mm$a*value)/(value + mm$b),
+               best_fit = type)
     } else {
       df <- merged %>% 
         filter(name == var) %>% 
@@ -625,18 +634,23 @@ shift_legend2 <- function(p) {
   facet.panels <- grep("^panel", gp[["layout"]][["name"]])
   empty.facet.panels <- sapply(facet.panels, function(i) "zeroGrob" %in% class(gp[["grobs"]][[i]]))
   empty.facet.panels <- facet.panels[empty.facet.panels]
-
+  
   # establish name of empty panels
   empty.facet.panels <- gp[["layout"]][empty.facet.panels, ]
   names <- empty.facet.panels$name
   # example of names:
   #[1] "panel-3-2" "panel-3-3"
-
-# now we just need a simple call to reposition the legend
+  
+  # now we just need a simple call to reposition the legend
   lemon::reposition_legend(p, 'center', panel=names)
 }
 
-shift_legend2(fig3)
+fig3 <- shift_legend2(fig3)
+
+ggsave(plot = fig3, 
+       'Figures/fig3.png', 
+       dpi = 600, 
+       width = 10,height = 5)
 ```
 
 
@@ -648,8 +662,8 @@ taxonomy <- readxl::read_excel('Data/Samples_Nick.xlsx',
                                sheet = 'taxonomy')
 
 data$Stream <- forcats::fct_relevel(data$Stream,
-                           c('Arboleda 30', 'Sura 30', 'Saltito 60',
-                             'Piper', 'Taconazo 30'))
+                                    c('Arboleda 30', 'Sura 30', 'Saltito 60',
+                                      'Piper', 'Taconazo 30'))
 
 # build taxonomy for each ID
 tax_data <- list()
@@ -663,12 +677,12 @@ for(i in 1:length(unique(data$Taxa))){
     data.frame() %>% 
     dplyr::filter(Taxa == rank) %>% 
     dplyr::mutate(rank = tax_info$Rank,
-           family = tax_info$Family,
-           order = tax_info$Order,
-           class = tax_info$Class,
-           phylum = tax_info$Phylum,
-           month = as.numeric(gsub(".*?([0-9]+).*", "\\1", Sample)),
-           rep = gsub("\\d+", "", Sample))
+                  family = tax_info$Family,
+                  order = tax_info$Order,
+                  class = tax_info$Class,
+                  phylum = tax_info$Phylum,
+                  month = as.numeric(gsub(".*?([0-9]+).*", "\\1", Sample)),
+                  rep = gsub("\\d+", "", Sample))
 }
 
 # create df
@@ -677,7 +691,7 @@ tax_data <- purrr::reduce(tax_data, rbind)
 # clean the data
 tax_data_clean <- tax_data %>% 
   dplyr::filter(QAQC == 0,
-         month != 24) 
+                month != 24) 
 ```
 
 ```{r bug-stats, warning=FALSE, echo=TRUE}
@@ -698,7 +712,7 @@ macro_density <- tax_data_clean %>%
   dplyr::group_by(site, month, rep) %>%                          # and do the grouping
   dplyr::summarise(total_order = sum(Total)) %>% 
   dplyr::left_join(final_dry_mass,
-            by = c('site', 'month', 'rep')) %>% 
+                   by = c('site', 'month', 'rep')) %>% 
   dplyr::mutate(abund_per_dm = total_order/dry_mass)
 
 macro_density_sum <- macro_density %>% 
@@ -706,11 +720,11 @@ macro_density_sum <- macro_density %>%
   summarise(mean_den = mean(abund_per_dm, na.rm = TRUE),
             se_den = sd(abund_per_dm, na.rm = TRUE)/length(mean_den))
 
-figure4 <- ggplot(macro_density_sum,
-       aes(x = month,
-           y = mean_den,
-           color = site,
-           group = site))+
+fig4 <- ggplot(macro_density_sum,
+               aes(x = month,
+                   y = mean_den,
+                   color = site,
+                   group = site))+
   geom_point()+
   geom_line()+
   geom_errorbar(aes(ymin = mean_den - se_den,
@@ -721,8 +735,12 @@ figure4 <- ggplot(macro_density_sum,
        x = 'Month')+
   scale_color_viridis_d(name = 'Site')+
   theme(axis.title = element_text(size = 12))
-figure4
+fig4
 
+ggsave(plot = fig4, 
+       'Figures/fig4.png', 
+       dpi = 600, 
+       width = 5,height = 4)
 
 macro_lm <- lm(data = macro_density,
                log10(abund_per_dm) ~ factor(month) * site)
@@ -795,7 +813,7 @@ plot_nmds_family_scrs <- ggplot(nmds_family_out,
   #      y = c(-0.75, 0.75))+
   geom_label(label = paste('2D Stress = ', stress_fam_log_2d),
              x = -0.65,
-             y = -0.75)
+             y = -0.65)
 plot_nmds_family_scrs
 
 
@@ -835,13 +853,18 @@ plot_nmds_streams <- ggplot(data = nmds_family_out,
 plot_nmds_streams
 
 fig5 <- ggpubr::ggarrange(plot_nmds_family_scrs,
-                  plot_nmds_streams,
-                  align = 'h', 
-                  widths = c(1,1.4),
-                  labels = 'auto',
-                  label.x = c(0.18,0.13))
+                          plot_nmds_streams,
+                          align = 'h', 
+                          widths = c(1,1.25),
+                          labels = 'auto',
+                          label.x = c(0.18,0.13),
+                          label.y = 0.98)
 fig5
 
+ggsave(plot = fig5, 
+       'Figures/fig5.png', 
+       dpi = 600, 
+       width = 11.5,height = 4)
 
 # Permanova
 # The goal of this test is to tell you if there are significant differences in your response variables among your groupings
@@ -878,7 +901,7 @@ table_s1 <- simper_use %>%
   dplyr::group_by(comparison, family)
 
 table_s1[,-c(8:9)] <- round(table_s1[,-c(8:9)],
-                       digits = 2)
+                            digits = 2)
 
 
 
