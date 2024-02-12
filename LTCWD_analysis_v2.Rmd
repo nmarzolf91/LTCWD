@@ -66,6 +66,11 @@ chem <- readxl::read_excel('Data/LT_CWD_datasheet.xlsx',
 
 cwd <- readxl::read_excel('Data/LT_CWD_datasheet.xlsx',
                           sheet = 'Sheet1')
+
+table_s1 <- readxl::read_excel('Data/LT_CWD_datasheet.xlsx',
+                          sheet = 'Wood Morphology')
+readr::write_csv(table_s1,
+                 'Data/table_s1.csv')
 ```
 
 # Stream chemistry for 5 sites
@@ -80,13 +85,15 @@ chem <- chem %>%
 chem_sum <- chem %>% 
   dplyr::group_by(site) %>%
   dplyr::summarise(dplyr::across(.cols = 2:7,
-                                 .fns = mean, na.rm = TRUE))
+                                 .fns = mean, 
+                                 na.rm = TRUE))
 
 # calculate SD from stream chemistry data
 chem_sd <- chem %>% 
   dplyr::group_by(site) %>%
-  dplyr::summarise(dplyr::across(.cols = 2:7,
-                                 .fns = sd, na.rm = TRUE))
+  dplyr::summarise(dplyr::across(.cols = 2:8,
+                                 .fns = sd, 
+                                 na.rm = TRUE))
 
 # create object that sorts sites by decreasing mean conductivity
 sites <- chem_sum %>%
@@ -117,7 +124,7 @@ chem_sum[4,4] = 37.9
 
 # calculate DIN and N:P ratio
 chem_sum <- chem_sum %>%
-  mutate(din = no3_n + nh4_n,
+  dplyr::mutate(din = no3_n + nh4_n,
          n_p = (din/14.0067)/(srp/30.973762))
 
 
@@ -125,11 +132,10 @@ chem_sum <- chem_sum %>%
 chem_sum$site <- forcats::fct_relevel(chem_sum$site,
                                       sites)
 
-table1 <- dplyr::arrange(chem_sum, desc(Cond))
+table1 <- dplyr::arrange(chem_sum, 
+                         desc(Cond))
 table1
 ```
-
-
 
 # Figure 1: Map
 ```{r map, warning=FALSE, echo=TRUE}
@@ -206,7 +212,6 @@ tmap_save(tm = fig1,
 ```
 
 
-
 # Calculate wood decomposition rates
 ```{r kCWD, warning=FALSE, echo=TRUE}
 # begin cleaning data
@@ -251,9 +256,10 @@ table2 <- cwd_calc %>%
     k_yr = (round((coef(lm(log(percent_mass) ~ month))[2])*12, 3))*-1,
     error = summary(lm(log(percent_mass) ~ month))$coefficient[3],
     #df = summary(lm(log(percent_mass) ~ month))$fstatistic,
-    r2 = summary(lm(log(percent_mass) ~ month))$r.squared,
+    r2 = round(summary(lm(log(percent_mass) ~ month))$r.squared, 2),
     p = anova(lm(log(percent_mass) ~ month))$'Pr(>F'[1])
 table2
+
 
 fig2 <- ggplot(data = cwd_calc,
                aes(y = log(percent_mass),
@@ -261,10 +267,15 @@ fig2 <- ggplot(data = cwd_calc,
   geom_point(aes(color = site))+
   geom_smooth(aes(color = site),
               method = 'lm',se = FALSE)+
+  lims(y = c(3.4, 5))+
   geom_label(data = table2 %>% 
                dplyr::select(site, k_yr),
-             aes(x = 2.5, y = 3.6,
+             aes(x = 2.5, y = 3.7,
                  label = paste0('k = ',k_yr)))+
+  geom_label(data = table2 %>% 
+               dplyr::select(site, r2),
+             aes(x = 2.5, y = 3.45,
+                 label = paste0('R2 = ',r2)))+
   facet_grid(. ~ site, 
              labeller = as_labeller(sites_long))+
   labs(x = 'Months',
@@ -278,6 +289,11 @@ ggsave(plot = fig2,
        'Figures/fig2.png',
        dpi = 600, 
        width = 10,height = 3)
+
+cwd_calc %>% 
+  group_by(site, month) %>% 
+  summarise(mean_per_mass = mean(percent_mass, na.rm = TRUE))
+
 ```
 
 
@@ -627,6 +643,7 @@ fig3 <- ggplot(merged_preds)+
   theme(axis.title.x = element_blank(),
         legend.background = element_blank(),
         legend.box.background = element_rect(colour = "black"))
+
 shift_legend2 <- function(p) {
   # ...
   # to grob
@@ -634,15 +651,15 @@ shift_legend2 <- function(p) {
   facet.panels <- grep("^panel", gp[["layout"]][["name"]])
   empty.facet.panels <- sapply(facet.panels, function(i) "zeroGrob" %in% class(gp[["grobs"]][[i]]))
   empty.facet.panels <- facet.panels[empty.facet.panels]
-  
+
   # establish name of empty panels
   empty.facet.panels <- gp[["layout"]][empty.facet.panels, ]
   names <- empty.facet.panels$name
   # example of names:
   #[1] "panel-3-2" "panel-3-3"
-  
-  # now we just need a simple call to reposition the legend
-  lemon::reposition_legend(p, 'center', panel=names)
+
+# now we just need a simple call to reposition the legend
+  lemon::reposition_legend(p, 'center', panel = names)
 }
 
 fig3 <- shift_legend2(fig3)
@@ -650,7 +667,7 @@ fig3 <- shift_legend2(fig3)
 ggsave(plot = fig3, 
        'Figures/fig3.png', 
        dpi = 600, 
-       width = 10,height = 5)
+       width = 11,height = 5)
 ```
 
 
@@ -896,11 +913,11 @@ simper_sig <- simper_use %>%
                    mean_avg = mean(average, na.rm = TRUE)) 
 
 
-table_s1 <- simper_use %>% 
+table_s2 <- simper_use %>% 
   dplyr::filter(p <= 0.05) %>% 
   dplyr::group_by(comparison, family)
 
-table_s1[,-c(8:9)] <- round(table_s1[,-c(8:9)],
+table_s2[,-c(8:9)] <- round(table_s2[,-c(8:9)],
                             digits = 2)
 
 
@@ -920,35 +937,6 @@ anosim_p <- anosim$signif
 ```{r session-info}
 pander(sessionInfo())
 ```
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
