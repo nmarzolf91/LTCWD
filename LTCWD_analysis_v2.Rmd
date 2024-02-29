@@ -68,7 +68,7 @@ cwd <- readxl::read_excel('Data/LT_CWD_datasheet.xlsx',
                           sheet = 'Sheet1')
 
 table_s1 <- readxl::read_excel('Data/LT_CWD_datasheet.xlsx',
-                          sheet = 'Wood Morphology')
+                               sheet = 'Wood Morphology')
 readr::write_csv(table_s1,
                  'Data/table_s1.csv')
 ```
@@ -91,7 +91,7 @@ chem_sum <- chem %>%
 # calculate SD from stream chemistry data
 chem_sd <- chem %>% 
   dplyr::group_by(site) %>%
-  dplyr::summarise(dplyr::across(.cols = 2:8,
+  dplyr::summarise(dplyr::across(.cols = 2:7,
                                  .fns = sd, 
                                  na.rm = TRUE))
 
@@ -112,20 +112,10 @@ sites_long <- c(`Arb` = 'Arboleda 30',
                 `Tac` = 'Taconazo 30')
 
 
-# fill in NA from Arb and Tac with long-term means
-# the monthly Arb and Tac data from those sites isn't available yet
-chem_sum[1,2] = 201.8
-chem_sum[1,3] = 200.0
-chem_sum[1,4] = 31.3
-
-chem_sum[4,2] = 3.92
-chem_sum[4,3] = 175.4
-chem_sum[4,4] = 37.9
-
 # calculate DIN and N:P ratio
 chem_sum <- chem_sum %>%
   dplyr::mutate(din = no3_n + nh4_n,
-         n_p = (din/14.0067)/(srp/30.973762))
+                n_p = (din/14.0067)/(srp/30.973762))
 
 
 # re-level the site factor
@@ -295,8 +285,6 @@ cwd_calc %>%
   summarise(mean_per_mass = mean(percent_mass, na.rm = TRUE))
 
 ```
-
-
 
 # Merge chemistry with decay rates
 ```{r decay-chemistry, warning=FALSE, echo=TRUE}
@@ -651,14 +639,14 @@ shift_legend2 <- function(p) {
   facet.panels <- grep("^panel", gp[["layout"]][["name"]])
   empty.facet.panels <- sapply(facet.panels, function(i) "zeroGrob" %in% class(gp[["grobs"]][[i]]))
   empty.facet.panels <- facet.panels[empty.facet.panels]
-
+  
   # establish name of empty panels
   empty.facet.panels <- gp[["layout"]][empty.facet.panels, ]
   names <- empty.facet.panels$name
   # example of names:
   #[1] "panel-3-2" "panel-3-3"
-
-# now we just need a simple call to reposition the legend
+  
+  # now we just need a simple call to reposition the legend
   lemon::reposition_legend(p, 'center', panel = names)
 }
 
@@ -674,41 +662,50 @@ ggsave(plot = fig3,
 # Macroinvertebrate analysis
 
 ```{r load-bug-data, warning=FALSE, echo=TRUE}
-data <- readxl::read_excel('Data/Samples_Nick.xlsx')
-taxonomy <- readxl::read_excel('Data/Samples_Nick.xlsx',
-                               sheet = 'taxonomy')
+data <- readxl::read_excel('Data/Samples_Nick_ana_2024.xlsx',
+                           sheet = 'Data')
 
 data$Stream <- forcats::fct_relevel(data$Stream,
                                     c('Arboleda 30', 'Sura 30', 'Saltito 60',
                                       'Piper', 'Taconazo 30'))
 
-# build taxonomy for each ID
-tax_data <- list()
-for(i in 1:length(unique(data$Taxa))){
-  rank <- unique(data$Taxa)[i]
-  
-  tax_info <- taxonomy %>% 
-    dplyr::filter(Taxa %in% rank)
-  
-  tax_data[[i]] <- data %>% 
-    data.frame() %>% 
-    dplyr::filter(Taxa == rank) %>% 
-    dplyr::mutate(rank = tax_info$Rank,
-                  family = tax_info$Family,
-                  order = tax_info$Order,
-                  class = tax_info$Class,
-                  phylum = tax_info$Phylum,
-                  month = as.numeric(gsub(".*?([0-9]+).*", "\\1", Sample)),
-                  rep = gsub("\\d+", "", Sample))
-}
-
-# create df
-tax_data <- purrr::reduce(tax_data, rbind)
-
 # clean the data
-tax_data_clean <- tax_data %>% 
+tax_data_clean <- data %>% 
+  dplyr::mutate(month = as.numeric(gsub(".*?([0-9]+).*", "\\1", Sample)),
+                rep = gsub("\\d+", "", Sample)) %>% 
+  dplyr::rename(ffg = `Functional group`) %>% 
   dplyr::filter(QAQC == 0,
                 month != 24) 
+
+fig_s7 <- tax_data_clean %>% 
+  filter(!is.na(ffg)) %>% 
+  group_by(ffg) %>% 
+  summarise(total_ffg = sum(Total, na.rm = TRUE)) %>% 
+  ggplot(.,
+         aes(x = ffg, 
+             y = total_ffg))+
+  geom_bar(stat = 'identity')+
+  geom_label(aes(label = total_ffg))+
+  scale_y_log10()+
+  labs(x = element_blank(),
+       y = 'Total Abundance')+
+  theme(axis.text.x = element_text(size = 8))
+
+ggsave(plot = fig_s7,
+       'Figures/fig_s7.png',
+       dpi = 600,
+       height = 4, width = 9)
+
+tot_macros <- sum(tax_data_clean$Total)
+threshold <- tot_macros*0.01
+
+# main FFGS: at least 1% of all FFGs identified
+main_ffgs <- tax_data_clean %>% 
+  dplyr::group_by(ffg) %>% 
+  dplyr::summarise(n = sum(Total)) %>% 
+  dplyr::filter(n > threshold) %>% 
+  dplyr::pull(ffg)
+
 ```
 
 ```{r bug-stats, warning=FALSE, echo=TRUE}
@@ -725,12 +722,12 @@ final_dry_mass$site <- dplyr::recode_factor(final_dry_mass$site,
 
 macro_density <- tax_data_clean %>% 
   dplyr::filter(!is.na(order)) %>%                               # remove NAs from Order
-  dplyr::select(site = Stream, order, month, rep, Total) %>%     # get the necessary columns
+  dplyr::select(site = Stream, Family, month, rep, Total) %>%     # get the necessary columns
   dplyr::group_by(site, month, rep) %>%                          # and do the grouping
-  dplyr::summarise(total_order = sum(Total)) %>% 
+  dplyr::summarise(total_family = sum(Total)) %>% 
   dplyr::left_join(final_dry_mass,
                    by = c('site', 'month', 'rep')) %>% 
-  dplyr::mutate(abund_per_dm = total_order/dry_mass)
+  dplyr::mutate(abund_per_dm = total_family/dry_mass)
 
 macro_density_sum <- macro_density %>% 
   group_by(site, month) %>% 
@@ -749,18 +746,63 @@ fig4 <- ggplot(macro_density_sum,
                 width = 0)+
   scale_x_continuous(breaks = c(0, 1, 3, 6, 12))+
   labs(y = expression(paste('Mean macroinvertebrate density (# g   ',DM^-1,')')),
-       x = 'Month')+
+       x = 'Months in Stream')+
   scale_color_viridis_d(name = 'Site')+
   theme(axis.title = element_text(size = 12))
 fig4
 
-ggsave(plot = fig4, 
-       'Figures/fig4.png', 
-       dpi = 600, 
-       width = 5,height = 4)
 
-macro_lm <- lm(data = macro_density,
-               log10(abund_per_dm) ~ factor(month) * site)
+macro_density_ffg <- tax_data_clean %>% 
+  dplyr::filter(!is.na(order)) %>%                               # remove NAs from Order
+  dplyr::select(site = Stream, ffg, month, rep, Total) %>%     # get the necessary columns
+  dplyr::group_by(site, month, ffg, rep) %>%                          # and do the grouping
+  dplyr::summarise(total_family = sum(Total))
+
+macro_density_sum_ffg <- macro_density_ffg %>% 
+  group_by(site, month, ffg) %>% 
+  summarise(mean_abund = mean(total_family, na.rm = TRUE),
+            se_abund = sd(total_family, na.rm = TRUE)/length(mean_abund))
+
+fig5 <- ggplot(macro_density_sum_ffg %>% 
+                   dplyr::filter(!is.na(ffg),
+                                 ffg %in% main_ffgs),
+               aes(x = month,
+                   y = mean_abund,
+                   color = site))+
+  geom_point()+
+  geom_line()+
+  geom_errorbar(aes(ymin = mean_abund - se_abund,
+                    ymax = mean_abund + se_abund),
+                width = 0)+
+  # geom_boxplot()+
+  facet_wrap(ffg ~ .,
+             scales = 'free_y')+
+  scale_color_viridis_d(name = 'Site')+
+  scale_x_continuous(breaks = c(1, 3, 6, 12))+
+  scale_y_continuous(breaks = function(y) {
+    max_value <- max(y, na.rm = TRUE)
+    tick_marks <- seq(0, round(max_value*.75, -1), length.out = 3)
+    return(tick_marks)
+  })+
+  labs(y = expression(paste('Mean FFG Abundance (#)')),
+       x = 'Months in Stream')+
+  theme(axis.title = element_text(size = 12))
+fig5
+
+# fig4_b <- shift_legend2(fig4_b)
+
+ggsave(plot = fig5, 
+       'Figures/fig5.png', 
+       dpi = 600, 
+       width = 6, height = 4)
+
+macro_density_mod <- macro_density %>% 
+  dplyr::mutate(log_abund = log10(abund_per_dm)) %>% 
+  dplyr::filter(is.finite(log_abund))
+
+macro_lm <- lm(data = macro_density_mod %>% 
+                 dplyr::filter(is.finite(abund_per_dm)),
+               log_abund ~ factor(month) * site)
 
 summary(macro_lm)
 anova(macro_lm)
@@ -771,13 +813,13 @@ hist(macro_lm$residuals)
 
 ```{r NMDS, warning=FALSE, echo=TRUE}
 tax_data_clean_family_log <- tax_data_clean %>% 
-  dplyr::filter(!is.na(family)) %>%                               # remove NAs from Order
-  dplyr::select(Stream, family, month, rep, Total) %>%    # get the necessary columns
-  dplyr::group_by(Stream, month, family) %>%         # and do the grouping
+  dplyr::filter(!is.na(Family)) %>%                               # remove NAs from Order
+  dplyr::select(Stream, Family, month, rep, Total) %>%    # get the necessary columns
+  dplyr::group_by(Stream, month, Family) %>%         # and do the grouping
   dplyr::summarise(mean_family = mean(Total, na.rm = TRUE)) %>%   # sum by order in each possible grouping 
   dplyr::mutate(log_total = log10(1 + mean_family)) %>%          # log10 + 1 transform data
   dplyr::select(-mean_family) %>% 
-  tidyr::pivot_wider(names_from = family,                         # pivot data
+  tidyr::pivot_wider(names_from = Family,                         # pivot data
                      values_from = log_total,
                      values_fill = 0)
 
@@ -825,12 +867,9 @@ plot_nmds_family_scrs <- ggplot(nmds_family_out,
                                 label = env.variables),
                             size = 3)+
   labs(x = 'NMDS 1',
-       y = 'NMDS 2')+
+       y = 'NMDS 2')
   # lims(x = c(-1,1),
   #      y = c(-0.75, 0.75))+
-  geom_label(label = paste('2D Stress = ', stress_fam_log_2d),
-             x = -0.65,
-             y = -0.65)
 plot_nmds_family_scrs
 
 
@@ -866,20 +905,23 @@ plot_nmds_streams <- ggplot(data = nmds_family_out,
   lims(x = c(-1,1),
        y = c(-0.75,0.75))+
   theme(legend.background = element_blank())+
-  scale_color_viridis_d(name = element_blank())
+  scale_color_viridis_d(name = element_blank())+
+  geom_label(label = paste('2D Stress = ', stress_fam_log_2d),
+             x = -0.6,
+             y = -0.65)
 plot_nmds_streams
 
-fig5 <- ggpubr::ggarrange(plot_nmds_family_scrs,
+fig6 <- ggpubr::ggarrange(plot_nmds_family_scrs,
                           plot_nmds_streams,
                           align = 'h', 
                           widths = c(1,1.25),
                           labels = 'auto',
                           label.x = c(0.18,0.13),
                           label.y = 0.98)
-fig5
+fig6
 
-ggsave(plot = fig5, 
-       'Figures/fig5.png', 
+ggsave(plot = fig6, 
+       'Figures/fig6.png', 
        dpi = 600, 
        width = 11.5,height = 4)
 
@@ -891,7 +933,6 @@ permanova <- vegan::adonis2(tax_data_log_matrix_fam ~ Stream * month,
                             method = 'bray', 
                             by = 'terms')
 permanova
-summary(permanova)
 
 # SIMPER
 sim <- with(tax_data_log_meta_fam, 
@@ -919,8 +960,6 @@ table_s2 <- simper_use %>%
 
 table_s2[,-c(8:9)] <- round(table_s2[,-c(8:9)],
                             digits = 2)
-
-
 
 # ANOSIM
 anosim <- vegan::anosim(tax_data_log_matrix_fam,
