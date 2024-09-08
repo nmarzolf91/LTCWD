@@ -1026,7 +1026,7 @@ fig3 <- ggplot(macro_density_sum,
                     ymax = mean_den + se_den),
                 width = 0)+
   scale_x_continuous(breaks = c(0, 1, 3, 6, 12))+
-  labs(y = expression(paste('Mean macroinvertebrate density (# g   ',DM^-1,')')),
+  labs(y = expression(paste('Mean macroinvertebrate density (Ind. g   ',DM^-1,')')),
        x = 'Months in Stream')+
   scale_color_viridis_d(name = 'Site')+
   theme(axis.title = element_text(size = 12))
