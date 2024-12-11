@@ -48,7 +48,7 @@ library(qpcR)
 library(sf)
 library(raster)
 library(spData)
-library(tmap)
+library(cowplot)
 library(leaflet)
 library(spDataLarge)
 
@@ -79,10 +79,14 @@ readr::write_csv(table_s1,
 
 ```{r chemistry, warning=FALSE, echo=TRUE}
 chem <- chem %>% 
-  dplyr::rename(site = 'Site',
-                srp = `SRP (ug/L)`,
+  dplyr::rename(srp = `SRP (ug/L)`,
                 no3_n = `NO3-N (ug/L)`,
-                nh4_n = `NH4-N (ug/L)`)
+                nh4_n = `NH4-N (ug/L)`) %>% 
+  dplyr::mutate(site = case_when(Site == 'Arb' ~ 'Arboleda-30',
+                                 Site == 'Sur30' ~ 'Sura-30',
+                                 Site == 'Tito60' ~ 'Saltito-60',
+                                 Site == 'Piper' ~ 'Piper-30',
+                                 Site == 'Tac' ~ 'Taconazo-30'))
 
 # calculate mean of all measurements
 chem_sum <- chem %>% 
@@ -107,13 +111,6 @@ sites <- chem_sum %>%
 # create a characeter vector of sites in order
 sites <- as.character(sites$site)
 
-# create a vector for longer names used in plotting
-sites_long <- c(`Arb` = 'Arboleda 30',
-                `Sur30` = 'Sura 30',
-                `Tito60` = 'Saltito 60',
-                `Piper` = 'Piper',
-                `Tac` = 'Taconazo 30')
-
 
 # calculate DIN and N:P ratio
 chem_sum <- chem_sum %>%
@@ -135,16 +132,23 @@ table1
 ```{r map, warning=FALSE, echo=TRUE}
 streams_gps <- readr::read_csv('C:/Users/Nick Marzolf/Desktop/NCSU/STREAMS/La Selva GIS data/LTREB Data/GPS sites.csv')
 
-
 cwd_coords <- streams_gps %>% 
   dplyr::filter(Site %in% sites_long) %>% 
+  dplyr::mutate(hyphen_site = gsub(' ', '-', Site)) %>% 
+  dplyr::mutate(Site = ifelse(Site == 'Piper',
+                              'Piper-30',
+                              hyphen_site),
+                Elevation = ifelse(Site == 'Piper-30',
+                                   30,
+                                   Elevation)) %>% 
+  dplyr::select(-hyphen_site) %>% 
   sf::st_as_sf(., 
                coords = c('Long', 'Lat'),
                crs = st_crs(4326))
 
 cwd_coords$Site <- forcats::fct_relevel(cwd_coords$Site,
-                                        c('Arboleda 30', 'Sura 30', 'Saltito 60',
-                                          'Piper', 'Taconazo 30'))
+                                        c('Arboleda-30', 'Sura-30', 'Saltito-60',
+                                          'Piper-30', 'Taconazo-30'))
 
 # La Selva boundary
 lsbs <- sf::st_read(dsn = 'Data/Spatial/laselvaboundary.shp')
@@ -152,66 +156,66 @@ lsbs <- sf::st_read(dsn = 'Data/Spatial/laselvaboundary.shp')
 # Streams at La Selva shapefile
 streams <- sf::st_read(dsn = 'Data/Spatial/streamsclip.shp')
 
-
+# shapefile for Costa Rica
 cr <- world %>%
   dplyr::filter(name_long == 'Costa Rica')
 
-# make a basic map of Costa Rica
-cr_map <- tmap::tm_shape(cr)+   # create shape based on Costa Rica object
-  tmap::tm_polygons()+          # add cr as a polygon
-  tmap::tm_shape(lsbs)+         # create shape for the boundary of La Selva
-  tmap::tm_dots(size = 1)       # add lsbs as a dot
-cr_map
+# make site map, with 5 streams
+sites_map <- ggplot()+
+  geom_sf(data = lsbs, 
+          fill = 'white',
+          color = 'black')+
+  geom_sf(data = streams,
+          color = 'blue')+
+  geom_sf(data = cwd_coords,
+          size = 5,
+          aes(color = Site))+
+  coord_sf(xlim = c(-84.05, -83.98),
+           ylim = c(10.395, 10.45),
+           crs = 4326)+
+  scale_color_viridis_d()+
+  ggspatial::annotation_scale(location = "bl",
+                              bar_cols = c("black", "white"))+
+  ggspatial::annotation_north_arrow(location = "tl", 
+                                    which_north = "true",
+                                    style = ggspatial::north_arrow_minimal(line_col = "black"))
 
+# create a centroid for La Selva
+centroid <- sf::st_centroid(lsbs[1,])
 
-# La Selva boundary and stream layer ----
+# create the inset map
+inset <- ggplot()+
+  geom_sf(data = cr)+
+  geom_sf(data = centroid)+
+  scale_x_continuous(breaks = -84)+
+  scale_y_continuous(breaks = 10)
 
-# Create a map of La Selva boundary and the stream network
-map_lsbs <- tmap::tm_shape(lsbs)+            # new shape: La Selva boundary
-  tmap::tm_borders()+                        # add as a border/line layer
-  tmap::tm_shape(streams)+                   # new shape: stream network
-  tmap::tm_lines(col = 'blue')+              # add as a line, colored blue
-  tmap::tm_scale_bar(breaks = c(0, 1, 2),    # add a scale bar, with demarkations for 0, 1, and 2 km
-                     text.size = 0.75,       # change text size
-                     position = c('left',    # put the scale bar in the bottom left
-                                  'bottom'))
-map_lsbs
+# make the full figure
+fig1 <- ggdraw()+
+  draw_plot(sites_map)+
+  draw_plot(inset, x = .6, y = 0.1, height = 0.25, width = 0.25)+
+  theme()
 
+# save the figure
+ggsave(plot = fig1,
+       filename = 'Figures/fig1_ggplot.png',
+       dpi = 600, 
+       width = 9.85, height = 7)
 
-fig1 <- tmap::tm_shape(lsbs)+                   # create La Selva boundary layer
-  tmap::tm_borders(col = 'black')+
-  tmap::tm_shape(streams)+                              # create stream network layer
-  tmap::tm_lines(col = 'blue')+
-  tmap::tm_shape(cwd_coords)+                             # map the locations of pH sites
-  tmap::tm_symbols(size = 1,                            # change the size
-                   col = 'Site',                        # colored by site name
-                   border.col = 'black',                # with black boundary color
-                   palette = "viridis", n = 5)+         # change the color palette
-  tmap::tm_scale_bar(breaks = c(0, 1, 2),               # add scale bar
-                     text.size = 0.75,
-                     position = c('left', 'bottom'))+
-  tmap::tm_layout(inner.margins = c(.15,.01, .01, .4),  # change the margins to fit the legend and inset map
-                  legend.position = c('right', 'top'),
-                  legend.frame = TRUE)+
-  tmap::tm_compass(position = c('left', 'top'))+        # add compass north star
-  tmap::tm_grid(projection = 4326,
-                labels.inside.frame = FALSE,
-                lines = FALSE)
-fig1
-
-tmap_save(tm = fig1,
-          filename = 'Figures/fig1.png', 
-          dpi = 600, 
-          width = 4, height = 4)
 ```
 
 # Calculate wood decomposition rates
 
 ```{r kCWD, warning=FALSE, echo=TRUE}
 # begin cleaning data
-cwd <- cwd %>% 
+cwd <- cwd %>%
+  dplyr::mutate(site = case_when(Site == 'Arb' ~ 'Arboleda-30',
+                                 Site == 'Sur30' ~ 'Sura-30',
+                                 Site == 'Tito60' ~ 'Saltito-60',
+                                 Site == 'Piper' ~ 'Piper-30',
+                                 Site == 'Tac' ~ 'Taconazo-30')) %>% 
   dplyr::filter(Flag == 0) %>%
-  dplyr::select(site = Site, 
+  dplyr::select(site, 
                 month = `Collection Month`,
                 rep = Rep,
                 init_mass = `initial CWD mass (g)`,
@@ -247,36 +251,47 @@ table2 <- cwd_calc %>%
   dplyr::group_by(site) %>%
   dplyr::summarise(
     int = round((coef(lm(log(percent_mass) ~ month))[1]), 3),
-    k_yr = (round((coef(lm(log(percent_mass) ~ month))[2])*12, 3))*-1,
+    k_yr = (round((coef(lm(log(percent_mass) ~ month))[2])*12, 4))*-1,
     error = summary(lm(log(percent_mass) ~ month))$coefficient[3],
     #df = summary(lm(log(percent_mass) ~ month))$fstatistic,
-    r2 = round(summary(lm(log(percent_mass) ~ month))$r.squared, 2),
+    r2 = round(summary(lm(log(percent_mass) ~ month))$r.squared, 3),
     p = anova(lm(log(percent_mass) ~ month))$'Pr(>F'[1])
 table2
 
 
-fig2 <- ggplot(data = cwd_calc,
+cwd_plot <- dplyr::left_join(cwd_calc, 
+                             table2, 
+                             by = 'site')
+
+fig2 <- ggplot(data = cwd_plot,
                aes(y = log(percent_mass),
                    x = month))+
   geom_point(aes(color = site))+
   geom_smooth(aes(color = site),
-              method = 'lm',se = FALSE)+
+              method = 'lm',
+              se = FALSE)+
   lims(y = c(3.4, 5))+
-  geom_label(data = table2 %>% 
-               dplyr::select(site, k_yr),
-             aes(x = 2.5, y = 3.7,
-                 label = paste0('k = ',k_yr)))+
-  geom_label(data = table2 %>% 
-               dplyr::select(site, r2),
-             aes(x = 2.5, y = 3.45,
-                 label = paste0('R2 = ',r2)))+
-  facet_grid(. ~ site, 
-             labeller = as_labeller(sites_long))+
-  labs(x = 'Months',
-       y = 'ln(% DM Remaining)')+
+  geom_text(data = table2 %>% 
+              dplyr::mutate(label = paste("italic(k) == ", k_yr)),
+            aes(x = 2.5, y = 3.7,
+                label = label),
+            parse = TRUE)+
+  geom_text(data = table2 %>% 
+              dplyr::mutate(label = paste("italic('R'^2) == ", r2)),
+            aes(x = 2.5, 
+                y = 3.45,
+                label = label),
+            parse = TRUE,
+            inherit.aes = FALSE)+
+  facet_grid(. ~ site)+
+  labs(x = 'Months in stream',
+       y = 'ln(% DM remaining)')+
   scale_color_viridis_d()+
   scale_x_continuous(breaks = c(0, 1, 3, 6, 12))+
-  theme(legend.position = 'none')
+  theme_classic()+
+  theme(legend.position = 'none',
+        panel.grid = element_blank(),
+        strip.background = element_blank())
 fig2
 
 ggsave(plot = fig2, 
@@ -296,7 +311,7 @@ cwd_calc %>%
 merged <- table2 %>%
   dplyr::select(site, k_yr, error) %>% 
   dplyr::right_join(chem_sum, 'site') %>%
-  dplyr::select(-Temp) %>%
+  # dplyr::select(-Temp) %>%
   tidyr::pivot_longer(srp:n_p)
 
 names_long <- c(`Cond` = 'Conductivity (µS/cm)',
@@ -322,7 +337,7 @@ rownames(cor_sub)[1] <- 'k_yr'
 colnames(cor_sub)[1:7] <- c('SRP', 'NO3-N', 'NH4-N', 'pH', 'Cond', 'DIN', 'DIN:SRP')
 
 pmat <- ggcorrplot::cor_pmat(cor,
-                 'spearman', alternative = 'two.sided')
+                             'spearman', alternative = 'two.sided')
 pmat_sub <- pmat[-c(2:nrow(pmat)), 2:ncol(pmat),drop = FALSE]
 
 ggcorrplot(cor_sub, lab = TRUE,
@@ -332,633 +347,650 @@ ggcorrplot(cor_sub, lab = TRUE,
 
 ```
 
+```{r old-modeling stufff}
 <!-- ## Run linear and non-linear models of kCWD ~ chemistry -->
-
-<!-- ```{r linear-mods, warning=FALSE, echo=TRUE} -->
-
-<!-- vars <- unique(merged$name) -->
-
-<!-- # linear: Y ~ a + bX -->
-
-<!-- # create empty dataframe to populate in the for loop -->
-
-<!-- linear <- data.frame(mod = character(), -->
-
-<!--                      var = character(), -->
-
-<!--                      a = numeric(), -->
-
-<!--                      a_2.5 = numeric(), -->
-
-<!--                      a_97.5 = numeric(), -->
-
-<!--                      b = numeric(), -->
-
-<!--                      b_2.5 = numeric(), -->
-
-<!--                      b_97.5 = numeric(), -->
-
-<!--                      AIC = numeric(), -->
-
-<!--                      p = numeric(), -->
-
-<!--                      rse = numeric(), -->
-
-<!--                      df = numeric()) -->
-
-<!-- # for loop across each parameter -->
-
-<!-- for(i in 1:length(vars)){ -->
-
-<!--   # which var is being predicted -->
-
-<!--   var <- vars[i] -->
-
-<!--   # run the lm of k ~ chemistry -->
-
-<!--   lm <- lm(data = merged %>% -->
-
-<!--              filter(name == var), -->
-
-<!--            k_yr ~ value) -->
-
-<!--   # populate the empty data frame -->
-
-<!--   linear <- linear %>%  -->
-
-<!--     add_row( -->
-
-<!--       mod = 'Linear',                    # what kind of model -->
-
-<!--       var = var,                         # for which variable -->
-
-<!--       a = coef(lm)[1],                   # intercept -->
-
-<!--       a_2.5 = confint(lm)[1,1],          # intercept low CI -->
-
-<!--       a_97.5 = confint(lm)[1,2],         # intercept high CI -->
-
-<!--       b = coef(lm)[2],                   # slope -->
-
-<!--       b_2.5 = confint(lm)[2,1],          # slope low CI -->
-
-<!--       b_97.5 = confint(lm)[2,2],         # slope high CI -->
-
-<!--       AIC = AIC(lm),                     # model AIC -->
-
-<!--       p = summary(lm)$coefficients[2,4], # p value -->
-
-<!--       rse = summary(lm)$sigma,           # RSE -->
-
-<!--       df = summary(lm)$df[2]             # df -->
-
-<!--     ) -->
-
-<!-- } -->
-
-<!-- ``` -->
-
-<!-- ```{r Mic-Men-mods, warning=FALSE, echo=TRUE} -->
-
-<!-- # empty data frame -->
-
-<!-- micmen <- data.frame(mod = character(), -->
-
-<!--                      fit = character(), -->
-
-<!--                      var = character(), -->
-
-<!--                      a = numeric(), -->
-
-<!--                      a_2.5 = numeric(), -->
-
-<!--                      a_97.5 = numeric(), -->
-
-<!--                      b = numeric(), -->
-
-<!--                      b_2.5 = numeric(), -->
-
-<!--                      b_97.5 = numeric(), -->
-
-<!--                      AIC = numeric(), -->
-
-<!--                      p = numeric()) -->
-
-<!-- # for loop for each variable -->
-
-<!-- for(i in 1:length(vars)) { -->
-
-<!--   var <- vars[i] -->
-
-<!--   mm_mod <- try(nls(data = merged %>%  -->
-
-<!--                       filter(name == var), -->
-
-<!--                     k_yr ~ SSmicmen(value, a, b)) -->
-
-<!--   ) -->
-
-<!--   # fault tolerance, won't work for every parameter -->
-
-<!--   if(inherits(mm_mod, 'try-error')){ -->
-
-<!--     micmen <- micmen %>%  -->
-
-<!--       add_row(fit = 'error', -->
-
-<!--               var = var, -->
-
-<!--               mod = 'Michaelis-Menten') -->
-
-<!--     next -->
-
-<!--   } -->
-
-<!--   # populate the data frame -->
-
-<!--   micmen <- micmen %>%  -->
-
-<!--     add_row( -->
-
-<!--       mod = 'Michaelis-Menten', -->
-
-<!--       fit = 'success', -->
-
-<!--       var = var, -->
-
-<!--       a = coef(mm_mod)[1], -->
-
-<!--       a_2.5 = confint2(mm_mod, level = 0.95)['a',1], -->
-
-<!--       a_97.5 = confint2(mm_mod, level = 0.95)['a',2], -->
-
-<!--       b = coef(mm_mod)[2], -->
-
-<!--       b_2.5 = confint2(mm_mod, level = 0.95)['b',1], -->
-
-<!--       b_97.5 = confint2(mm_mod, level = 0.95)['b',2], -->
-
-<!--       AIC = AIC(mm_mod), -->
-
-<!--       p = summary(mm_mod)$coefficients[8] -->
-
-<!--     ) -->
-
-<!-- } -->
-
-<!-- ``` -->
-
-<!-- ```{r logarithmic, warning=FALSE, echo=TRUE} -->
-
-<!-- ## Logarithmic: Y ~ a + b*log(X) -->
-
-<!-- logarithmic <- data.frame(mod = character(), -->
-
-<!--                           var = character(), -->
-
-<!--                           a = numeric(), -->
-
-<!--                           a_2.5 = numeric(), -->
-
-<!--                           a_97.5 = numeric(), -->
-
-<!--                           b = numeric(), -->
-
-<!--                           b_2.5 = numeric(), -->
-
-<!--                           b_97.5 = numeric(), -->
-
-<!--                           AIC = numeric(), -->
-
-<!--                           R2 = numeric(), -->
-
-<!--                           p = numeric(), -->
-
-<!--                           rse = numeric(), -->
-
-<!--                           df = numeric() -->
-
-<!-- ) -->
-
-<!-- for(i in 1:length(vars)) { -->
-
-<!--   var <- vars[i] -->
-
-<!--   loga <- lm(data = merged %>%  -->
-
-<!--                filter(name == var), -->
-
-<!--              k_yr ~ log10(value))  -->
-
-<!--   logarithmic <- logarithmic %>%  -->
-
-<!--     add_row( -->
-
-<!--       mod = 'Logarithmic', -->
-
-<!--       var = var, -->
-
-<!--       a = coef(loga)[1], -->
-
-<!--       a_2.5 = confint(loga)[1], -->
-
-<!--       a_97.5 = confint(loga)[3], -->
-
-<!--       b = coef(loga)[2], -->
-
-<!--       b_2.5 = confint(loga)[2], -->
-
-<!--       b_97.5 = confint(loga)[4], -->
-
-<!--       AIC = AIC(loga), -->
-
-<!--       R2 = summary(loga)$r.squared, -->
-
-<!--       p = summary(loga)$coefficients[8], -->
-
-<!--       rse = summary(loga)$sigma, -->
-
-<!--       df = summary(loga)$df[2] -->
-
-<!--     ) -->
-
-<!-- } -->
-
-<!-- ``` -->
-
-<!-- ```{r logistic, warning=FALSE, echo=TRUE} -->
-
-<!-- ## Logistic: Y ~ 1/1+exp(X) -->
-
-<!-- logistic <- data.frame(mod = character(), -->
-
-<!--                        var = character(), -->
-
-<!--                        b = numeric(), -->
-
-<!--                        b_2.5 = numeric(), -->
-
-<!--                        b_97.5 = numeric(), -->
-
-<!--                        d = numeric(), -->
-
-<!--                        d_2.5 = numeric(), -->
-
-<!--                        d_97.5 = numeric(), -->
-
-<!--                        e = numeric(), -->
-
-<!--                        e_2.5 = numeric(), -->
-
-<!--                        e_97.5 = numeric(), -->
-
-<!--                        AIC = numeric(), -->
-
-<!--                        rse = numeric(), -->
-
-<!--                        df = numeric()) -->
-
-<!-- for(i in 1:length(vars)){ -->
-
-<!--   var <- vars[i] -->
-
-<!--   logi <- drm(k_yr ~ value,  -->
-
-<!--               data = merged %>%  -->
-
-<!--                 filter(name == var), -->
-
-<!--               fct = L.3()) -->
-
-<!--   logistic <- logistic %>%  -->
-
-<!--     add_row( -->
-
-<!--       mod = 'Logistic', -->
-
-<!--       var = var, -->
-
-<!--       b = coef(logi)[1], -->
-
-<!--       b_2.5 = confint2(logi)['b:(Intercept)',1], -->
-
-<!--       b_97.5 = confint2(logi)['b:(Intercept)',2], -->
-
-<!--       d = coef(logi)[2], -->
-
-<!--       d_2.5 = confint2(logi)['d:(Intercept)',1], -->
-
-<!--       d_97.5 = confint2(logi)['d:(Intercept)',2], -->
-
-<!--       e = coef(logi)[3], -->
-
-<!--       e_2.5 = confint2(logi)['e:(Intercept)',1], -->
-
-<!--       e_97.5 = confint2(logi)['b:(Intercept)',2], -->
-
-<!--       AIC = AIC(logi), -->
-
-<!--       rse = summary(logi)$rseMat[1], -->
-
-<!--       df = summary(logi)$rseMat[2]) -->
-
-<!-- } -->
-
-<!-- ``` -->
-
-<!-- ## Combine and evaluate model fits -->
-
-<!-- ```{r model-comps, warning=FALSE, echo=TRUE} -->
-
-<!-- # combine model outputs -->
-
-<!-- aic_all <- rbind(logistic %>%  -->
-
-<!--                    dplyr::select(mod, var, AIC) %>%  -->
-
-<!--                    mutate(p = NA), -->
-
-<!--                  logarithmic %>%  -->
-
-<!--                    dplyr::select(mod, var, AIC, p), -->
-
-<!--                  linear %>%  -->
-
-<!--                    dplyr::select(mod, var, AIC, p), -->
-
-<!--                  micmen %>%  -->
-
-<!--                    dplyr::select(mod, var, AIC, p)) -->
-
-<!-- best_fits <- aic_all %>%  -->
-
-<!--   arrange(var, -->
-
-<!--           AIC) %>%  -->
-
-<!--   group_by(var) %>%  -->
-
-<!--   dplyr::slice_head(n=1) -->
-
-<!-- aic_wts <- data.frame() -->
-
-<!-- for(i in 1:length(vars)) { -->
-
-<!--   use <- vars[i] -->
-
-<!--   df <- aic_all %>%  -->
-
-<!--     filter(!is.na(AIC), -->
-
-<!--            var %in% use) %>%  -->
-
-<!--     mutate(delAIC = akaike.weights(AIC)$deltaAIC, -->
-
-<!--            weights = akaike.weights(AIC)$weights) -->
-
-<!--   aic_wts <- rbind(aic_wts, df) -->
-
-<!-- } -->
-
-<!-- table3 <- aic_wts %>%  -->
-
-<!--   dplyr::select(var, mod, weights) %>%  -->
-
-<!--   pivot_wider(names_from = var,  -->
-
-<!--               values_from = weights) -->
-
-<!-- table3 -->
-
-<!-- ``` -->
-
-<!-- ```{r pred-k, warning=FALSE, echo=TRUE} -->
-
-<!-- # plot decay rates as a function of chemistry -->
-
-<!-- # add lines for SRP (linear), NH4 (M-M), N:P(M-M), and cond (linear) -->
-
-<!-- merged_preds <- data.frame() -->
-
-<!-- for(i in 1:length(best_fits$var)) { -->
-
-<!--   fit <- best_fits[i,] -->
-
-<!--   type <- pull(fit[1]) -->
-
-<!--   var <- pull(fit[2]) -->
-
-<!--   if(type == 'Logistic'){ -->
-
-<!--     logis <- logistic %>%  -->
-
-<!--       filter(var == !!var) -->
-
-<!--     df <- merged %>%  -->
-
-<!--       filter(name == var) %>%  -->
-
-<!--       mutate(pred_k = logis$d/(1+exp(logis$b*(value - logis$e))), -->
-
-<!--              best_fit = type) -->
-
-<!--   } # end logistic if statement -->
-
-<!--   if(type == 'Linear') { -->
-
-<!--     line <- linear %>%  -->
-
-<!--       filter(var == !!var) -->
-
-<!--     if(line$p <= 0.05){ -->
-
-<!--       df <- merged %>%  -->
-
-<!--         filter(name == var) %>%  -->
-
-<!--         mutate(pred_k = line$a + (value*line$b), -->
-
-<!--                best_fit = type) -->
-
-<!--     } else { -->
-
-<!--       df <- merged %>%  -->
-
-<!--         filter(name == var) %>%  -->
-
-<!--         mutate(pred_k = NA, -->
-
-<!--                best_fit = NA) -->
-
-<!--     } -->
-
-<!--   } # end linear if statement -->
-
-<!--   if(type == 'Michaelis-Menten'){ -->
-
-<!--     mm <- micmen %>%  -->
-
-<!--       filter(var == !!var) -->
-
-<!--     if(mm$p <= 0.05){ -->
-
-<!--       df <- merged %>%  -->
-
-<!--         filter(name == var) %>%  -->
-
-<!--         mutate(pred_k = (mm$a*value)/(value + mm$b), -->
-
-<!--                best_fit = type) -->
-
-<!--     } else { -->
-
-<!--       df <- merged %>%  -->
-
-<!--         filter(name == var) %>%  -->
-
-<!--         mutate(pred_k = NA, -->
-
-<!--                best_fit = NA) -->
-
-<!--     } -->
-
-<!--   } # end M-M for loop -->
-
-<!--   if(type == 'Logarithmic'){ -->
-
-<!--     logar <- logarithmic %>%  -->
-
-<!--       filter(var == !!var) -->
-
-<!--     if(logar$p <= 0.05) { -->
-
-<!--       df <- merged %>%  -->
-
-<!--         filter(name == var) %>%  -->
-
-<!--         mutate(pred_k = logar$a + (logar$b*value), -->
-
-<!--                best_fit = type) -->
-
-<!--     } else { -->
-
-<!--       df <- merged %>%  -->
-
-<!--         filter(name == var) %>%  -->
-
-<!--         mutate(pred_k = NA, -->
-
-<!--                best_fit = NA) -->
-
-<!--     } -->
-
-<!--   } # end logarithmic if statement -->
-
-<!--   merged_preds <- rbind(merged_preds, df) -->
-
-<!-- } # end for loop -->
+  
+  <!-- ```{r linear-mods, warning=FALSE, echo=TRUE} -->
+  
+  <!-- vars <- unique(merged$name) -->
+  
+  <!-- # linear: Y ~ a + bX -->
+  
+  <!-- # create empty dataframe to populate in the for loop -->
+  
+  <!-- linear <- data.frame(mod = character(), -->
+                              
+                              <!--                      var = character(), -->
+                              
+                              <!--                      a = numeric(), -->
+                              
+                              <!--                      a_2.5 = numeric(), -->
+                              
+                              <!--                      a_97.5 = numeric(), -->
+                              
+                              <!--                      b = numeric(), -->
+                              
+                              <!--                      b_2.5 = numeric(), -->
+                              
+                              <!--                      b_97.5 = numeric(), -->
+                              
+                              <!--                      AIC = numeric(), -->
+                              
+                              <!--                      p = numeric(), -->
+                              
+                              <!--                      rse = numeric(), -->
+                              
+                              <!--                      df = numeric()) -->
+  
+  <!-- # for loop across each parameter -->
+  
+  <!-- for(i in 1:length(vars)){ -->
+      
+      <!--   # which var is being predicted -->
+      
+      <!--   var <- vars[i] -->
+        
+        <!--   # run the lm of k ~ chemistry -->
+        
+        <!--   lm <- lm(data = merged %>% -->
+                          
+                          <!--              filter(name == var), -->
+                          
+                          <!--            k_yr ~ value) -->
+          
+          <!--   # populate the empty data frame -->
+          
+          <!--   linear <- linear %>%  -->
+            
+            <!--     add_row( -->
+                                
+                                <!--       mod = 'Linear',                    # what kind of model -->
+                              
+                              <!--       var = var,                         # for which variable -->
+                              
+                              <!--       a = coef(lm)[1],                   # intercept -->
+                              
+                              <!--       a_2.5 = confint(lm)[1,1],          # intercept low CI -->
+                              
+                              <!--       a_97.5 = confint(lm)[1,2],         # intercept high CI -->
+                              
+                              <!--       b = coef(lm)[2],                   # slope -->
+                              
+                              <!--       b_2.5 = confint(lm)[2,1],          # slope low CI -->
+                              
+                              <!--       b_97.5 = confint(lm)[2,2],         # slope high CI -->
+                              
+                              <!--       AIC = AIC(lm),                     # model AIC -->
+                              
+                              <!--       p = summary(lm)$coefficients[2,4], # p value -->
+                              
+                              <!--       rse = summary(lm)$sigma,           # RSE -->
+                              
+                              <!--       df = summary(lm)$df[2]             # df -->
+                              
+                              <!--     ) -->
+            
+            <!-- } -->
+  
+  <!-- ``` -->
+  
+  <!-- ```{r Mic-Men-mods, warning=FALSE, echo=TRUE} -->
+  
+  <!-- # empty data frame -->
+  
+  <!-- micmen <- data.frame(mod = character(), -->
+                              
+                              <!--                      fit = character(), -->
+                              
+                              <!--                      var = character(), -->
+                              
+                              <!--                      a = numeric(), -->
+                              
+                              <!--                      a_2.5 = numeric(), -->
+                              
+                              <!--                      a_97.5 = numeric(), -->
+                              
+                              <!--                      b = numeric(), -->
+                              
+                              <!--                      b_2.5 = numeric(), -->
+                              
+                              <!--                      b_97.5 = numeric(), -->
+                              
+                              <!--                      AIC = numeric(), -->
+                              
+                              <!--                      p = numeric()) -->
+  
+  <!-- # for loop for each variable -->
+  
+  <!-- for(i in 1:length(vars)) { -->
+      
+      <!--   var <- vars[i] -->
+        
+        <!--   mm_mod <- try(nls(data = merged %>%  -->
+                                   
+                                   <!--                       filter(name == var), -->
+                                   
+                                   <!--                     k_yr ~ SSmicmen(value, a, b)) -->
+                               
+                               <!--   ) -->
+          
+          <!--   # fault tolerance, won't work for every parameter -->
+          
+          <!--   if(inherits(mm_mod, 'try-error')){ -->
+              
+              <!--     micmen <- micmen %>%  -->
+                
+                <!--       add_row(fit = 'error', -->
+                                     
+                                     <!--               var = var, -->
+                                     
+                                     <!--               mod = 'Michaelis-Menten') -->
+                
+                <!--     next -->
+                
+                <!--   } -->
+          
+          <!--   # populate the data frame -->
+          
+          <!--   micmen <- micmen %>%  -->
+            
+            <!--     add_row( -->
+                                
+                                <!--       mod = 'Michaelis-Menten', -->
+                                
+                                <!--       fit = 'success', -->
+                                
+                                <!--       var = var, -->
+                                
+                                <!--       a = coef(mm_mod)[1], -->
+                                
+                                <!--       a_2.5 = confint2(mm_mod, level = 0.95)['a',1], -->
+                                
+                                <!--       a_97.5 = confint2(mm_mod, level = 0.95)['a',2], -->
+                                
+                                <!--       b = coef(mm_mod)[2], -->
+                                
+                                <!--       b_2.5 = confint2(mm_mod, level = 0.95)['b',1], -->
+                                
+                                <!--       b_97.5 = confint2(mm_mod, level = 0.95)['b',2], -->
+                                
+                                <!--       AIC = AIC(mm_mod), -->
+                                
+                                <!--       p = summary(mm_mod)$coefficients[8] -->
+                                
+                                <!--     ) -->
+            
+            <!-- } -->
+  
+  <!-- ``` -->
+  
+  <!-- ```{r logarithmic, warning=FALSE, echo=TRUE} -->
+  
+  <!-- ## Logarithmic: Y ~ a + b*log(X) -->
+  
+  <!-- logarithmic <- data.frame(mod = character(), -->
+                                   
+                                   <!--                           var = character(), -->
+                                   
+                                   <!--                           a = numeric(), -->
+                                   
+                                   <!--                           a_2.5 = numeric(), -->
+                                   
+                                   <!--                           a_97.5 = numeric(), -->
+                                   
+                                   <!--                           b = numeric(), -->
+                                   
+                                   <!--                           b_2.5 = numeric(), -->
+                                   
+                                   <!--                           b_97.5 = numeric(), -->
+                                   
+                                   <!--                           AIC = numeric(), -->
+                                   
+                                   <!--                           R2 = numeric(), -->
+                                   
+                                   <!--                           p = numeric(), -->
+                                   
+                                   <!--                           rse = numeric(), -->
+                                   
+                                   <!--                           df = numeric() -->
+                                   
+                                   <!-- ) -->
+  
+  <!-- for(i in 1:length(vars)) { -->
+      
+      <!--   var <- vars[i] -->
+        
+        <!--   loga <- lm(data = merged %>%  -->
+                            
+                            <!--                filter(name == var), -->
+                            
+                            <!--              k_yr ~ log10(value))  -->
+          
+          <!--   logarithmic <- logarithmic %>%  -->
+            
+            <!--     add_row( -->
+                                
+                                <!--       mod = 'Logarithmic', -->
+                                
+                                <!--       var = var, -->
+                                
+                                <!--       a = coef(loga)[1], -->
+                                
+                                <!--       a_2.5 = confint(loga)[1], -->
+                                
+                                <!--       a_97.5 = confint(loga)[3], -->
+                                
+                                <!--       b = coef(loga)[2], -->
+                                
+                                <!--       b_2.5 = confint(loga)[2], -->
+                                
+                                <!--       b_97.5 = confint(loga)[4], -->
+                                
+                                <!--       AIC = AIC(loga), -->
+                                
+                                <!--       R2 = summary(loga)$r.squared, -->
+                                
+                                <!--       p = summary(loga)$coefficients[8], -->
+                                
+                                <!--       rse = summary(loga)$sigma, -->
+                                
+                                <!--       df = summary(loga)$df[2] -->
+                                
+                                <!--     ) -->
+            
+            <!-- } -->
+  
+  <!-- ``` -->
+  
+  <!-- ```{r logistic, warning=FALSE, echo=TRUE} -->
+  
+  <!-- ## Logistic: Y ~ 1/1+exp(X) -->
+  
+  <!-- logistic <- data.frame(mod = character(), -->
+                                
+                                <!--                        var = character(), -->
+                                
+                                <!--                        b = numeric(), -->
+                                
+                                <!--                        b_2.5 = numeric(), -->
+                                
+                                <!--                        b_97.5 = numeric(), -->
+                                
+                                <!--                        d = numeric(), -->
+                                
+                                <!--                        d_2.5 = numeric(), -->
+                                
+                                <!--                        d_97.5 = numeric(), -->
+                                
+                                <!--                        e = numeric(), -->
+                                
+                                <!--                        e_2.5 = numeric(), -->
+                                
+                                <!--                        e_97.5 = numeric(), -->
+                                
+                                <!--                        AIC = numeric(), -->
+                                
+                                <!--                        rse = numeric(), -->
+                                
+                                <!--                        df = numeric()) -->
+  
+  <!-- for(i in 1:length(vars)){ -->
+      
+      <!--   var <- vars[i] -->
+        
+        <!--   logi <- drm(k_yr ~ value,  -->
+                             
+                             <!--               data = merged %>%  -->
+                             
+                             <!--                 filter(name == var), -->
+                             
+                             <!--               fct = L.3()) -->
+          
+          <!--   logistic <- logistic %>%  -->
+            
+            <!--     add_row( -->
+                                
+                                <!--       mod = 'Logistic', -->
+                                
+                                <!--       var = var, -->
+                                
+                                <!--       b = coef(logi)[1], -->
+                                
+                                <!--       b_2.5 = confint2(logi)['b:(Intercept)',1], -->
+                                
+                                <!--       b_97.5 = confint2(logi)['b:(Intercept)',2], -->
+                                
+                                <!--       d = coef(logi)[2], -->
+                                
+                                <!--       d_2.5 = confint2(logi)['d:(Intercept)',1], -->
+                                
+                                <!--       d_97.5 = confint2(logi)['d:(Intercept)',2], -->
+                                
+                                <!--       e = coef(logi)[3], -->
+                                
+                                <!--       e_2.5 = confint2(logi)['e:(Intercept)',1], -->
+                                
+                                <!--       e_97.5 = confint2(logi)['b:(Intercept)',2], -->
+                                
+                                <!--       AIC = AIC(logi), -->
+                                
+                                <!--       rse = summary(logi)$rseMat[1], -->
+                                
+                                <!--       df = summary(logi)$rseMat[2]) -->
+            
+            <!-- } -->
+  
+  <!-- ``` -->
+  
+  <!-- ## Combine and evaluate model fits -->
+  
+  <!-- ```{r model-comps, warning=FALSE, echo=TRUE} -->
+  
+  <!-- # combine model outputs -->
+  
+  <!-- aic_all <- rbind(logistic %>%  -->
+                          
+                          <!--                    dplyr::select(mod, var, AIC) %>%  -->
+                          
+                          <!--                    mutate(p = NA), -->
+                          
+                          <!--                  logarithmic %>%  -->
+                          
+                          <!--                    dplyr::select(mod, var, AIC, p), -->
+                          
+                          <!--                  linear %>%  -->
+                          
+                          <!--                    dplyr::select(mod, var, AIC, p), -->
+                          
+                          <!--                  micmen %>%  -->
+                          
+                          <!--                    dplyr::select(mod, var, AIC, p)) -->
+  
+  <!-- best_fits <- aic_all %>%  -->
+  
+  <!--   arrange(var, -->
+                   
+                   <!--           AIC) %>%  -->
+  
+  <!--   group_by(var) %>%  -->
+  
+  <!--   dplyr::slice_head(n=1) -->
+  
+  <!-- aic_wts <- data.frame() -->
+  
+  <!-- for(i in 1:length(vars)) { -->
+      
+      <!--   use <- vars[i] -->
+        
+        <!--   df <- aic_all %>%  -->
+          
+          <!--     filter(!is.na(AIC), -->
+                            
+                            <!--            var %in% use) %>%  -->
+          
+          <!--     mutate(delAIC = akaike.weights(AIC)$deltaAIC, -->
+                            
+                            <!--            weights = akaike.weights(AIC)$weights) -->
+          
+          <!--   aic_wts <- rbind(aic_wts, df) -->
+            
+            <!-- } -->
+  
+  <!-- table3 <- aic_wts %>%  -->
+  
+  <!--   dplyr::select(var, mod, weights) %>%  -->
+  
+  <!--   pivot_wider(names_from = var,  -->
+                       
+                       <!--               values_from = weights) -->
+  
+  <!-- table3 -->
+  
+  <!-- ``` -->
+  
+  <!-- ```{r pred-k, warning=FALSE, echo=TRUE} -->
+  
+  <!-- # plot decay rates as a function of chemistry -->
+  
+  <!-- # add lines for SRP (linear), NH4 (M-M), N:P(M-M), and cond (linear) -->
+  
+  <!-- merged_preds <- data.frame() -->
+  
+  <!-- for(i in 1:length(best_fits$var)) { -->
+      
+      <!--   fit <- best_fits[i,] -->
+        
+        <!--   type <- pull(fit[1]) -->
+          
+          <!--   var <- pull(fit[2]) -->
+            
+            <!--   if(type == 'Logistic'){ -->
+                
+                <!--     logis <- logistic %>%  -->
+                  
+                  <!--       filter(var == !!var) -->
+                  
+                  <!--     df <- merged %>%  -->
+                    
+                    <!--       filter(name == var) %>%  -->
+                    
+                    <!--       mutate(pred_k = logis$d/(1+exp(logis$b*(value - logis$e))), -->
+                                        
+                                        <!--              best_fit = type) -->
+                    
+                    <!--   } # end logistic if statement -->
+          
+          <!--   if(type == 'Linear') { -->
+              
+              <!--     line <- linear %>%  -->
+                
+                <!--       filter(var == !!var) -->
+                
+                <!--     if(line$p <= 0.05){ -->
+                    
+                    <!--       df <- merged %>%  -->
+                      
+                      <!--         filter(name == var) %>%  -->
+                      
+                      <!--         mutate(pred_k = line$a + (value*line$b), -->
+                                            
+                                            <!--                best_fit = type) -->
+                      
+                      <!--     } else { -->
+                          
+                          <!--       df <- merged %>%  -->
+                            
+                            <!--         filter(name == var) %>%  -->
+                            
+                            <!--         mutate(pred_k = NA, -->
+                                                  
+                                                  <!--                best_fit = NA) -->
+                            
+                            <!--     } -->
+                
+                <!--   } # end linear if statement -->
+          
+          <!--   if(type == 'Michaelis-Menten'){ -->
+              
+              <!--     mm <- micmen %>%  -->
+                
+                <!--       filter(var == !!var) -->
+                
+                <!--     if(mm$p <= 0.05){ -->
+                    
+                    <!--       df <- merged %>%  -->
+                      
+                      <!--         filter(name == var) %>%  -->
+                      
+                      <!--         mutate(pred_k = (mm$a*value)/(value + mm$b), -->
+                                            
+                                            <!--                best_fit = type) -->
+                      
+                      <!--     } else { -->
+                          
+                          <!--       df <- merged %>%  -->
+                            
+                            <!--         filter(name == var) %>%  -->
+                            
+                            <!--         mutate(pred_k = NA, -->
+                                                  
+                                                  <!--                best_fit = NA) -->
+                            
+                            <!--     } -->
+                
+                <!--   } # end M-M for loop -->
+          
+          <!--   if(type == 'Logarithmic'){ -->
+              
+              <!--     logar <- logarithmic %>%  -->
+                
+                <!--       filter(var == !!var) -->
+                
+                <!--     if(logar$p <= 0.05) { -->
+                    
+                    <!--       df <- merged %>%  -->
+                      
+                      <!--         filter(name == var) %>%  -->
+                      
+                      <!--         mutate(pred_k = logar$a + (logar$b*value), -->
+                                            
+                                            <!--                best_fit = type) -->
+                      
+                      <!--     } else { -->
+                          
+                          <!--       df <- merged %>%  -->
+                            
+                            <!--         filter(name == var) %>%  -->
+                            
+                            <!--         mutate(pred_k = NA, -->
+                                                  
+                                                  <!--                best_fit = NA) -->
+                            
+                            <!--     } -->
+                
+                <!--   } # end logarithmic if statement -->
+          
+          <!--   merged_preds <- rbind(merged_preds, df) -->
+            
+            <!-- } # end for loop -->
 
 <!-- fig3 <- ggplot(merged_preds)+ -->
+  
+  <!--   geom_point(aes(x = value, -->
+                          
+                          <!--                  y = k_yr, -->
+                          
+                          <!--                  color = site), -->
+                      
+                      <!--              size = 4)+ -->
+  
+  <!--   geom_line(aes(x = value,  -->
+                         
+                         <!--                 y = pred_k), -->
+                     
+                     <!--             size = 1, -->
+                     
+                     <!--             linetype = 'dashed')+ -->
+  
+  <!--   ylab(expression(paste(k[wood], ' (', y^-1,')')))+ -->
+  
+  <!--   facet_wrap(. ~ name, -->
+                      
+                      <!--              nrow = 2, -->
+                      
+                      <!--              scales = 'free', -->
+                      
+                      <!--              labeller = as_labeller(names_long), -->
+                      
+                      <!--              drop = FALSE)+ -->
+  
+  <!--   scale_color_viridis_d(name = 'Site', -->
+                                 
+                                 <!--                         labels = as_labeller(sites_long))+ -->
+  
+  <!--   theme(axis.title.x = element_blank(), -->
+                 
+                 <!--         legend.background = element_blank(), -->
+                 
+                 <!--         legend.box.background = element_rect(colour = "black")) -->
+  
+  <!-- shift_legend2 <- function(p) { -->
+      
+      <!--   # ... -->
+      
+      <!--   # to grob -->
+      
+      <!--   gp <- ggplotGrob(p) -->
+        
+        <!--   facet.panels <- grep("^panel", gp[["layout"]][["name"]]) -->
+          
+          <!--   empty.facet.panels <- sapply(facet.panels, function(i) "zeroGrob" %in% class(gp[["grobs"]][[i]])) -->
+            
+            <!--   empty.facet.panels <- facet.panels[empty.facet.panels] -->
+              
+              <!--   # establish name of empty panels -->
+              
+              <!--   empty.facet.panels <- gp[["layout"]][empty.facet.panels, ] -->
+                
+                <!--   names <- empty.facet.panels$name -->
+                  
+                  <!--   # example of names: -->
+                  
+                  <!--   #[1] "panel-3-2" "panel-3-3" -->
+                  
+                  <!--   # now we just need a simple call to reposition the legend -->
+                  
+                  <!--   lemon::reposition_legend(p, 'center', panel = names) -->
+                  
+                  <!-- } -->
+  
+  <!-- fig3 <- shift_legend2(fig3) -->
+  
+  <!-- ggsave(plot = fig3,  -->
+                
+                <!--        'Figures/fig3.png',  -->
+                
+                <!--        dpi = 600,  -->
+                
+                <!--        width = 11,height = 5) -->
+  
+  <!-- ``` -->
+  ```
 
-<!--   geom_point(aes(x = value, -->
-
-<!--                  y = k_yr, -->
-
-<!--                  color = site), -->
-
-<!--              size = 4)+ -->
-
-<!--   geom_line(aes(x = value,  -->
-
-<!--                 y = pred_k), -->
-
-<!--             size = 1, -->
-
-<!--             linetype = 'dashed')+ -->
-
-<!--   ylab(expression(paste(k[wood], ' (', y^-1,')')))+ -->
-
-<!--   facet_wrap(. ~ name, -->
-
-<!--              nrow = 2, -->
-
-<!--              scales = 'free', -->
-
-<!--              labeller = as_labeller(names_long), -->
-
-<!--              drop = FALSE)+ -->
-
-<!--   scale_color_viridis_d(name = 'Site', -->
-
-<!--                         labels = as_labeller(sites_long))+ -->
-
-<!--   theme(axis.title.x = element_blank(), -->
-
-<!--         legend.background = element_blank(), -->
-
-<!--         legend.box.background = element_rect(colour = "black")) -->
-
-<!-- shift_legend2 <- function(p) { -->
-
-<!--   # ... -->
-
-<!--   # to grob -->
-
-<!--   gp <- ggplotGrob(p) -->
-
-<!--   facet.panels <- grep("^panel", gp[["layout"]][["name"]]) -->
-
-<!--   empty.facet.panels <- sapply(facet.panels, function(i) "zeroGrob" %in% class(gp[["grobs"]][[i]])) -->
-
-<!--   empty.facet.panels <- facet.panels[empty.facet.panels] -->
-
-<!--   # establish name of empty panels -->
-
-<!--   empty.facet.panels <- gp[["layout"]][empty.facet.panels, ] -->
-
-<!--   names <- empty.facet.panels$name -->
-
-<!--   # example of names: -->
-
-<!--   #[1] "panel-3-2" "panel-3-3" -->
-
-<!--   # now we just need a simple call to reposition the legend -->
-
-<!--   lemon::reposition_legend(p, 'center', panel = names) -->
-
-<!-- } -->
-
-<!-- fig3 <- shift_legend2(fig3) -->
-
-<!-- ggsave(plot = fig3,  -->
-
-<!--        'Figures/fig3.png',  -->
-
-<!--        dpi = 600,  -->
-
-<!--        width = 11,height = 5) -->
-
-<!-- ``` -->
 
 # Macroinvertebrate analysis
-
 ```{r load-bug-data, warning=FALSE, echo=TRUE}
 data <- readxl::read_excel('Data/Samples_Nick_ana_2024.xlsx',
-                           sheet = 'Data')
+                           sheet = 'Data') %>% 
+  dplyr::mutate(Stream = case_when(Stream == 'Arboleda 30' ~ 'Arboleda-30',
+                                   Stream == 'Sura 30' ~ 'Sura-30',
+                                   Stream == 'Saltito 60' ~ 'Saltito-60',
+                                   Stream == 'Piper' ~ 'Piper-30',
+                                   Stream == 'Taconazo 30' ~ 'Taconazo-30'),
+                functional_group = case_when(`Functional group` == "Predator" ~ 'Predators',
+                                             `Functional group` == "Filters" ~ 'Filterers',
+                                             `Functional group` == "Collectors-Gatherers" ~ "Collector-Gatherers",
+                                             `Functional group` == "Shredder plant tissue" ~ "Shredder plant tissue",
+                                             `Functional group` == "Shredder detritus" ~ "Shredder detritus",
+                                             `Functional group` == "Scrapers" ~ "Scrapers",
+                                             `Functional group` == "Piercers" ~ "Piercers",
+                                             `Functional group` == "Miners" ~ "Miners",
+                                             `Functional group` == "Shredder detritus" ~ "Shredder detritus",
+                                             `Functional group` == "Endoparasite" ~ "Endoparasite"))
 
 data$Stream <- forcats::fct_relevel(data$Stream,
-                                    c('Arboleda 30', 'Sura 30', 'Saltito 60',
-                                      'Piper', 'Taconazo 30'))
+                                    c('Arboleda-30', 'Sura-30', 'Saltito-60',
+                                      'Piper-30', 'Taconazo-30'))
 
 # clean the data
 tax_data_clean <- data %>% 
   dplyr::mutate(month = as.numeric(gsub(".*?([0-9]+).*", "\\1", Sample)),
                 rep = gsub("\\d+", "", Sample)) %>% 
-  dplyr::rename(ffg = `Functional group`) %>% 
+  dplyr::rename(ffg = functional_group) %>% 
   dplyr::filter(QAQC == 0,
                 month != 24) 
 
-fig_s7 <- tax_data_clean %>% 
+fig_s1 <- tax_data_clean %>% 
   filter(!is.na(ffg)) %>% 
   group_by(ffg) %>% 
   summarise(total_ffg = sum(Total, na.rm = TRUE)) %>% 
@@ -966,14 +998,15 @@ fig_s7 <- tax_data_clean %>%
          aes(x = ffg, 
              y = total_ffg))+
   geom_bar(stat = 'identity')+
-  geom_label(aes(label = total_ffg))+
+  geom_label(aes(label = total_ffg),nudge_y = 0.15)+
   scale_y_log10()+
   labs(x = element_blank(),
        y = 'Total Abundance')+
+  coord_flip()+
   theme(axis.text.x = element_text(size = 8))
 
-ggsave(plot = fig_s7,
-       'Figures/fig_s7.png',
+ggsave(plot = fig_s1,
+       'Figures/fig_s1.png',
        dpi = 600,
        height = 4, width = 9)
 
@@ -994,11 +1027,11 @@ main_ffgs <- tax_data_clean %>%
 final_dry_mass <- readr::read_csv('Data/final_dry_mass.csv')
 
 final_dry_mass$site <- dplyr::recode_factor(final_dry_mass$site,
-                                            Arb = 'Arboleda 30',
-                                            Sur30 = 'Sura 30',
-                                            Tito60 = 'Saltito 60',
-                                            Piper = 'Piper',
-                                            Tac = 'Taconazo 30')
+                                            Arb = 'Arboleda-30',
+                                            Sur30 = 'Sura-30',
+                                            Tito60 = 'Saltito-60',
+                                            Piper = 'Piper-30',
+                                            Tac = 'Taconazo-30')
 
 
 macro_density <- tax_data_clean %>% 
@@ -1015,7 +1048,8 @@ macro_density_sum <- macro_density %>%
   summarise(mean_den = mean(abund_per_dm, na.rm = TRUE),
             se_den = sd(abund_per_dm, na.rm = TRUE)/length(mean_den))
 
-fig3 <- ggplot(macro_density_sum,
+fig3 <- ggplot(macro_density_sum %>%
+                 mutate(across(everything(), ~ ifelse(is.nan(.), 0, .))),
                aes(x = month,
                    y = mean_den,
                    color = site,
@@ -1026,10 +1060,12 @@ fig3 <- ggplot(macro_density_sum,
                     ymax = mean_den + se_den),
                 width = 0)+
   scale_x_continuous(breaks = c(0, 1, 3, 6, 12))+
-  labs(y = expression(paste('Mean macroinvertebrate density (Ind. g   ',DM^-1,')')),
-       x = 'Months in Stream')+
+  labs(y = 'Mean macroinvertebrate density (ind./g DM',
+       x = 'Months in stream')+
   scale_color_viridis_d(name = 'Site')+
-  theme(axis.title = element_text(size = 12))
+  theme(axis.title = element_text(size = 12),
+        panel.grid = element_blank())+
+  theme_classic()
 fig3
 
 
@@ -1069,11 +1105,13 @@ fig4 <- ggplot(macro_density_sum_ffg %>%
   scale_y_continuous(breaks = function(y) {
     max_value <- max(y, na.rm = TRUE)
     tick_marks <- seq(0, round(max_value*.75, -1), length.out = 3)
-    return(tick_marks)
-  })+
-  labs(y = expression(paste('Mean FFG Abundance (#)')),
-       x = 'Months in Stream')+
-  theme(axis.title = element_text(size = 12))
+    return(tick_marks)})+
+  labs(y = 'Mean FFG Abundance (no.)',
+       x = 'Months in stream')+
+  theme_classic()+
+  theme(axis.title = element_text(size = 12),
+        panel.grid = element_blank(),
+        strip.background = element_blank())
 fig4
 
 # fig4_b <- shift_legend2(fig4_b)
@@ -1082,6 +1120,7 @@ ggsave(plot = fig4,
        'Figures/fig4.png', 
        dpi = 600, 
        width = 6, height = 4)
+
 
 macro_density_mod <- macro_density %>% 
   dplyr::mutate(log_abund = log10(abund_per_dm)) %>% 
@@ -1120,7 +1159,52 @@ nmds_family_log_2d <- vegan::metaMDS(tax_data_log_matrix_fam,
 
 stress_fam_log_2d <- round(nmds_family_log_2d$stress, 3)
 
-# pick the log transformed 2d NMDS (14.4% stress)
+# evaluate the NMDS via screeplot and Shepard plot
+scree <- goeveg::screeplot_NMDS(tax_data_log_matrix_fam, 
+                                distance = 'bray', 
+                                autotransform = FALSE)
+
+df_scree <- tibble::rownames_to_column(data.frame(scree))
+
+scree_plot <- ggplot(df_scree,
+                     aes(x = rowname,
+                         y = scree))+
+  geom_bar(stat = 'identity')+
+  geom_label(aes(label = scree))+
+  labs(x = 'Dimensions',
+       y = 'Stress')+
+  theme_classic()
+
+shepard <- data.frame(vegan::stressplot(nmds_family_log_2d))
+
+shepard_plot <- ggplot(shepard)+
+  geom_point(aes(x = x, y = y))+
+  geom_line(aes(x = x, y = yf),
+            color = 'red')+
+  geom_label(x = 0.2, y = 1.5,
+             label = 'Non-metric fit R2 = 0.979',
+             label.size = 0)+
+  geom_label(x = 0.2, y = 1.2,
+             label = 'Linear fit R2 = 0.893',
+             label.size = 0)+
+  labs(x = 'Observed dissimilarity',
+       y = 'Ordination distance')+
+  theme_classic()+
+  theme(panel.grid = element_blank())
+
+fig_s2 <- ggpubr::ggarrange(scree_plot,
+                            shepard_plot,
+                            labels = 'AUTO',
+                            ncol = 2,
+                            widths = c(1, 2))
+
+ggsave(plot = fig_s2, 
+       'Figures/fig_s2.png', 
+       dpi = 600, 
+       width = 11, height = 5)
+
+
+# pick the log transformed 2d NMDS (14.6% stress)
 
 nmds_family_out <- data.frame(x = nmds_family_log_2d$points[,1],
                               y = nmds_family_log_2d$points[,2])
@@ -1154,9 +1238,11 @@ plot_nmds_family_scrs <- ggplot(nmds_family_out,
                                 label = env.variables),
                             size = 3)+
   labs(x = 'NMDS 1',
-       y = 'NMDS 2')
-# lims(x = c(-1,1),
-#      y = c(-0.75, 0.75))+
+       y = 'NMDS 2')+
+  lims(x = c(-1,1),
+       y = c(-0.75,0.75))+
+  theme_classic()+
+  theme(panel.grid = element_blank())
 plot_nmds_family_scrs
 
 
@@ -1191,18 +1277,22 @@ plot_nmds_streams <- ggplot(data = nmds_family_out,
        y = "NMDS 2")+
   lims(x = c(-1,1),
        y = c(-0.75,0.75))+
-  theme(legend.background = element_blank())+
-  scale_color_viridis_d(name = element_blank())+
-  geom_label(label = paste('2D Stress = ', stress_fam_log_2d),
+  scale_color_viridis_d(name = 'Site')+
+  geom_label(label = paste('2D stress = ', stress_fam_log_2d),
              x = -0.6,
-             y = -0.65)
+             y = -0.65,
+             label.size = 0)+
+  theme_classic()+
+  theme(panel.grid = element_blank(),
+        legend.background = element_blank(),
+        axis.title.y = element_blank())
 plot_nmds_streams
 
 fig5 <- ggpubr::ggarrange(plot_nmds_family_scrs,
                           plot_nmds_streams,
                           align = 'h', 
                           widths = c(1,1.25),
-                          labels = 'auto',
+                          labels = 'AUTO',
                           label.x = c(0.18,0.13),
                           label.y = 0.98)
 fig5
@@ -1246,7 +1336,10 @@ table_s2 <- simper_use %>%
   dplyr::group_by(comparison, family)
 
 table_s2[,-c(8:9)] <- round(table_s2[,-c(8:9)],
-                            digits = 2)
+                            digits = 4)
+readr::write_csv(table_s2,
+                 'Data/table_s2.csv')
+
 
 # ANOSIM
 anosim <- vegan::anosim(tax_data_log_matrix_fam,
