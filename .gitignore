@@ -41,9 +41,6 @@ vignettes/*.pdf
 # Rproj
 LTCWD.Rproj
 
-# data
-Data/
-
 # Notes
 LTCWD_notes.docx
 
